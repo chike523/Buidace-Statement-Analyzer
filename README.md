@@ -1,32 +1,75 @@
-# React + TypeScript + Vite
+# Buidace Statement Analyzer
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A **local-first** bank statement analyzer that runs entirely in your browser. Upload CSV or PDF statements, explore income and spending, detect duplicates and recurring payments, and export a summary report for a financial advisor or AI.
 
-Currently, two official plugins are available:
+**Live app:** [chike523.github.io/Buidace-Statement-Analyzer](https://chike523.github.io/Buidace-Statement-Analyzer/)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **CSV & PDF import** — digital PDFs and scanned statements (OCR via Tesseract, lazy-loaded)
+- **Multi-account** — import statements from different banks or wallets
+- **Overview dashboard** — income, expenses, net flow, monthly charts
+- **Transactions** — virtualized table with filters and name search
+- **Review** — duplicate detection and internal transfer pairs
+- **Recurring payments** — automatic pattern detection
+- **Export report** — download or copy a Markdown summary for advisors or AI tools
+- **Privacy** — data stays in your browser tab; nothing is uploaded to a server
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Supported formats
 
-## Expanding the Oxlint configuration
+| Format | Notes |
+|--------|--------|
+| CSV | Column mapping with auto-detect |
+| Digital PDF | Text extraction via pdf.js |
+| Scanned PDF | OCR fallback when no text layer |
+| OPay PDF | Optimized parser for OPay statement layout |
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Quick start (local)
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+git clone https://github.com/chike523/Buidace-Statement-Analyzer.git
+cd Buidace-Statement-Analyzer
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Open [http://localhost:5173](http://localhost:5173).
+
+### Build
+
+```bash
+npm run build
+npm run preview
+```
+
+## How to use
+
+1. **Import** — drop a CSV or PDF on the welcome screen
+2. **Review** — confirm parsed rows and create or select an account
+3. **Overview** — use toggles to exclude internal transfers or group payees
+4. **Transactions** — filter, search, and drill into line items
+5. **Review tab** — resolve duplicate groups and check transfer pairs
+6. **Export report** — header button downloads `financial-summary-YYYY-MM-DD.md` or copies to clipboard
+
+## Tech stack
+
+- React 19 + TypeScript + Vite
+- [DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview) for analytics
+- pdf.js, Papa Parse, Tesseract.js, Recharts
+
+## Deployment
+
+The app is a static site. GitHub Pages deploys automatically on push to `main` via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
+To enable Pages (first time only):
+
+1. Repo **Settings → Pages**
+2. **Build and deployment → Source:** GitHub Actions
+
+## Privacy
+
+All parsing and analysis happen in your browser. Closing the tab clears session data unless you keep the tab open. The hosted site does not receive your statement files or transaction data.
+
+## License
+
+Private / all rights reserved unless otherwise specified by the repository owner.
