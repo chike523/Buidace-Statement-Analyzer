@@ -19,7 +19,7 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.22.0",
     "papaparse": "^5.5.4",
-    "pdfjs-dist": "^6.1.200",
+    "pdfjs-dist": "4.8.69",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "recharts": "^3.9.1",

@@ -20,7 +20,7 @@ export async function renderPdfPagesToImages(buffer: ArrayBuffer): Promise<Image
     const ctx = canvas.getContext('2d')
     if (!ctx) continue
 
-    await page.render({ canvasContext: ctx, viewport, canvas }).promise
+    await page.render({ canvasContext: ctx, viewport }).promise
     images.push(ctx.getImageData(0, 0, canvas.width, canvas.height))
   }
 
