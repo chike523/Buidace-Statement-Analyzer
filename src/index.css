@@ -30,6 +30,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--color-background);
   color: var(--color-foreground);
   font-family:
@@ -37,8 +38,20 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Comfortable tap targets without changing desktop density much */
+@media (max-width: 639px) {
+  button,
+  [role='switch'],
+  select,
+  input {
+    touch-action: manipulation;
+  }
 }

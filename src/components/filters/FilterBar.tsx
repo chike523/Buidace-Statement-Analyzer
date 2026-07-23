@@ -21,29 +21,31 @@ export function FilterBar() {
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <AccountSwitcher />
-        <Select
-          value={filters.type}
-          onChange={(e) => setFilters({ type: e.target.value as typeof filters.type })}
-          className="w-32"
-        >
-          <option value="all">All types</option>
-          <option value="debit">Debits</option>
-          <option value="credit">Credits</option>
-        </Select>
-        <div className="flex gap-1">
-          <Button variant="outline" size="sm" onClick={() => setPreset(30)}>
+    <div className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-3 sm:p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          <AccountSwitcher />
+          <Select
+            value={filters.type}
+            onChange={(e) => setFilters({ type: e.target.value as typeof filters.type })}
+            className="w-full sm:w-32"
+          >
+            <option value="all">All types</option>
+            <option value="debit">Debits</option>
+            <option value="credit">Credits</option>
+          </Select>
+        </div>
+        <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <Button variant="outline" size="sm" className="min-h-9 shrink-0" onClick={() => setPreset(30)}>
             30d
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setPreset(90)}>
+          <Button variant="outline" size="sm" className="min-h-9 shrink-0" onClick={() => setPreset(90)}>
             90d
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setPreset(365)}>
+          <Button variant="outline" size="sm" className="min-h-9 shrink-0" onClick={() => setPreset(365)}>
             1y
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setPreset('all')}>
+          <Button variant="outline" size="sm" className="min-h-9 shrink-0" onClick={() => setPreset('all')}>
             All
           </Button>
         </div>
@@ -56,6 +58,7 @@ export function FilterBar() {
           onChange={(e) => setFilters({ date_from: e.target.value })}
           aria-label="From date"
           title="From date"
+          className="min-h-10"
         />
         <Input
           type="date"
@@ -63,24 +66,28 @@ export function FilterBar() {
           onChange={(e) => setFilters({ date_to: e.target.value })}
           aria-label="To date"
           title="To date"
+          className="min-h-10"
         />
         <Input
           type="number"
           placeholder="Min amount"
           value={filters.amount_min}
           onChange={(e) => setFilters({ amount_min: e.target.value })}
+          className="min-h-10"
         />
         <Input
           type="number"
           placeholder="Max amount"
           value={filters.amount_max}
           onChange={(e) => setFilters({ amount_max: e.target.value })}
+          className="min-h-10"
         />
         <NameSearch />
       </div>
       {filters.search && (
         <p className="text-xs text-[var(--color-muted-foreground)]">
-          Filtering by name: <span className="font-medium text-[var(--color-foreground)]">{filters.search}</span>
+          Filtering by name:{' '}
+          <span className="font-medium text-[var(--color-foreground)]">{filters.search}</span>
         </p>
       )}
     </div>

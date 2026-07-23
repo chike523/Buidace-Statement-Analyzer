@@ -76,9 +76,9 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-3">
+      <div className="flex flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:px-4">
         {showTransferToggle && (
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm sm:min-h-0">
             <Switch
               checked={dashboardPrefs.exclude_transfers}
               onCheckedChange={(checked) => setDashboardPrefs({ exclude_transfers: checked })}
@@ -86,7 +86,7 @@ export function Dashboard() {
             <span>Exclude transfers</span>
           </label>
         )}
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm sm:min-h-0">
           <Switch
             checked={dashboardPrefs.merchant_mode === 'smart'}
             onCheckedChange={(checked) =>
@@ -142,22 +142,23 @@ export function Dashboard() {
           <CardHeader>
             <CardTitle className="text-base">Monthly cash flow</CardTitle>
           </CardHeader>
-          <CardContent className="h-72 min-h-72">
+          <CardContent className="h-56 min-h-56 sm:h-72 sm:min-h-72">
             {chartData.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[var(--color-muted-foreground)]">
                 No monthly data for the current filters.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%" minHeight={288}>
-                <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height="100%" minHeight={224}>
+                <BarChart data={chartData} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis
-                    tick={{ fontSize: 11 }}
+                    width={48}
+                    tick={{ fontSize: 10 }}
                     tickFormatter={(v) => `${chartSuffix}${(Number(v) / 1000).toFixed(0)}k`}
                   />
                   <Tooltip formatter={(v) => fmt(Number(v))} />
-                  <Legend />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar dataKey="income" fill="#16a34a" name="Income" radius={[4, 4, 0, 0]} isAnimationActive={false} />
                   <Bar dataKey="expenses" fill="#dc2626" name="Expenses" radius={[4, 4, 0, 0]} isAnimationActive={false} />
                 </BarChart>
@@ -170,18 +171,19 @@ export function Dashboard() {
           <CardHeader>
             <CardTitle className="text-base">Net flow trend</CardTitle>
           </CardHeader>
-          <CardContent className="h-72 min-h-72">
+          <CardContent className="h-56 min-h-56 sm:h-72 sm:min-h-72">
             {chartData.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[var(--color-muted-foreground)]">
                 No monthly data for the current filters.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%" minHeight={288}>
-                <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height="100%" minHeight={224}>
+                <LineChart data={chartData} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis
-                    tick={{ fontSize: 11 }}
+                    width={48}
+                    tick={{ fontSize: 10 }}
                     tickFormatter={(v) => `${chartSuffix}${(Number(v) / 1000).toFixed(0)}k`}
                   />
                   <Tooltip formatter={(v) => fmt(Number(v))} />
@@ -280,12 +282,14 @@ function StatCard({
 }) {
   return (
     <Card>
-      <CardContent className="flex items-center justify-between p-6">
-        <div>
+      <CardContent className="flex items-center justify-between gap-2 p-4 sm:p-6">
+        <div className="min-w-0">
           <p className="text-sm text-[var(--color-muted-foreground)]">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
+          <p className="truncate text-xl font-bold tabular-nums sm:text-2xl" title={value}>
+            {value}
+          </p>
         </div>
-        {icon}
+        <div className="shrink-0">{icon}</div>
       </CardContent>
     </Card>
   )

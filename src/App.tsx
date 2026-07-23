@@ -62,7 +62,7 @@ function AppContent() {
 
   const tabs = [
     { id: 'dashboard', label: 'Overview' },
-    { id: 'transactions', label: 'Transactions' },
+    { id: 'transactions', label: 'Activity' },
     {
       id: 'review',
       label: pendingDupes > 0 ? `Review (${pendingDupes})` : 'Review',
@@ -70,7 +70,7 @@ function AppContent() {
     {
       id: 'recurring',
       label:
-        recurringPatterns.length > 0 ? `Recurring (${recurringPatterns.length})` : 'Recurring',
+        recurringPatterns.length > 0 ? `Bills (${recurringPatterns.length})` : 'Bills',
     },
   ]
 
@@ -86,27 +86,32 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-card)]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">Statement Analyzer</h1>
-            <p className="text-sm text-[var(--color-muted-foreground)]">
+    <div className="min-h-screen pb-[env(safe-area-inset-bottom)]">
+      <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-card)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-card)]/80">
+        <div className="mx-auto flex max-w-7xl items-start justify-between gap-3 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:items-center sm:gap-4 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold tracking-tight sm:text-xl">Statement Analyzer</h1>
+            <p className="truncate text-xs text-[var(--color-muted-foreground)] sm:text-sm">
               {hasData
                 ? `${accounts.length} account${accounts.length !== 1 ? 's' : ''} · ${transactionCount.toLocaleString()} transactions`
                 : 'Import a statement to get started'}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
             <PersistenceToggle />
             {hasData && (
               <>
                 <Suspense fallback={null}>
                   <ExportReportButton />
                 </Suspense>
-                <Button variant="outline" size="sm" onClick={() => setActiveTab('upload')}>
-                  <Upload className="mr-1.5 h-3.5 w-3.5" />
-                  Import
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9"
+                  onClick={() => setActiveTab('upload')}
+                >
+                  <Upload className="h-3.5 w-3.5 sm:mr-1.5" />
+                  <span className="hidden sm:inline">Import</span>
                 </Button>
               </>
             )}
@@ -114,7 +119,7 @@ function AppContent() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6">
         {!hasData ? (
           <WelcomeHero />
         ) : (

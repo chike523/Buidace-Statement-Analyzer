@@ -63,22 +63,36 @@ export function ExportReportButton() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="sm" onClick={handleDownload} disabled={loading}>
+    <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-h-9"
+        onClick={handleDownload}
+        disabled={loading}
+        aria-label="Export report"
+      >
         {loading ? (
-          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin sm:mr-1.5" />
         ) : (
-          <FileDown className="mr-1.5 h-3.5 w-3.5" />
+          <FileDown className="h-3.5 w-3.5 sm:mr-1.5" />
         )}
-        Export report
+        <span className="hidden sm:inline">Export report</span>
       </Button>
-      <Button variant="ghost" size="sm" onClick={handleCopy} disabled={loading}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="min-h-9"
+        onClick={handleCopy}
+        disabled={loading}
+        aria-label={copied ? 'Copied' : 'Copy for AI'}
+      >
         {copied ? (
-          <Check className="mr-1.5 h-3.5 w-3.5 text-green-600" />
+          <Check className="h-3.5 w-3.5 text-green-600 sm:mr-1.5" />
         ) : (
-          <Copy className="mr-1.5 h-3.5 w-3.5" />
+          <Copy className="h-3.5 w-3.5 sm:mr-1.5" />
         )}
-        {copied ? 'Copied' : 'Copy for AI'}
+        <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy for AI'}</span>
       </Button>
     </div>
   )

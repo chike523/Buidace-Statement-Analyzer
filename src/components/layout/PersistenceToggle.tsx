@@ -28,6 +28,7 @@ export function PersistenceToggle() {
         id="persist-toggle"
         checked={persistenceEnabled}
         disabled={persistenceBusy}
+        aria-label="Save on device"
         onCheckedChange={(checked) => {
           void setPersistence(checked)
         }}

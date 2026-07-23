@@ -108,7 +108,7 @@ export function AccountSwitcher() {
     <Select
       value={filters.account_id}
       onChange={(e) => setFilters({ account_id: e.target.value })}
-      className="w-48"
+      className="w-full min-h-10 sm:w-48 sm:min-h-9"
     >
       <option value="all">All accounts</option>
       {accounts.map((a) => (
