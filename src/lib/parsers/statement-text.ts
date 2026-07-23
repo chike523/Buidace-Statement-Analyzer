@@ -2,7 +2,9 @@ const MONTH = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec'
 const DATE = `\\d{2}\\s+(?:${MONTH})\\s+\\d{4}`
 const AMOUNT = `[\\d,]+\\.\\d{2}|--`
 
-const OPAY_ROW_RE = new RegExp(
+// Matches a common tabular statement row:
+// <posted datetime> <value date> <description> <debit> <credit> <balance>
+const TABULAR_ROW_RE = new RegExp(
   `(?:${DATE}\\s+\\d{2}:\\d{2}:\\d{2})\\s+(${DATE})\\s+(.+?)\\s+(${AMOUNT})\\s+(${AMOUNT})\\s+(${AMOUNT})`,
   'gi',
 )
@@ -19,11 +21,11 @@ function parseAmountToken(token: string): number | null {
   return Number.isFinite(num) ? num : null
 }
 
-export function parseOpayText(text: string): { date: string; description: string; amount: number }[] {
+export function parseTabularText(text: string): { date: string; description: string; amount: number }[] {
   const rows: { date: string; description: string; amount: number }[] = []
   const normalized = text.replace(/\s+/g, ' ')
 
-  for (const match of normalized.matchAll(OPAY_ROW_RE)) {
+  for (const match of normalized.matchAll(TABULAR_ROW_RE)) {
     const date = parseMonthDate(match[1])
     const description = match[2].trim()
     const debit = parseAmountToken(match[3])
@@ -43,8 +45,8 @@ export function parseOpayText(text: string): { date: string; description: string
 }
 
 export function parseGenericText(text: string): { date: string; description: string; amount: number }[] {
-  const opay = parseOpayText(text)
-  if (opay.length > 0) return opay
+  const tabular = parseTabularText(text)
+  if (tabular.length > 0) return tabular
 
   const rows: { date: string; description: string; amount: number }[] = []
   for (const line of text.split('\n')) {

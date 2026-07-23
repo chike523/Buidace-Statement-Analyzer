@@ -9,12 +9,11 @@ export type ImportSummary = {
 
 export function suggestAccountName(filename: string): string {
   const base = filename
-    .replace(/\.(pdf|csv|tsv)$/i, '')
+    .replace(/\.(pdf|csv|tsv|xlsx|xls|ofx|qfx)$/i, '')
     .replace(/[_-]/g, ' ')
     .replace(/\(\d+\)$/, '')
     .trim()
 
-  if (/opay|owallet/i.test(base)) return 'OPay'
   if (/gtbank|guaranty/i.test(base)) return 'GTBank'
   if (/access/i.test(base)) return 'Access Bank'
   if (/kuda/i.test(base)) return 'Kuda'

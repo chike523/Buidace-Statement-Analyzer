@@ -15,7 +15,7 @@ Upload a CSV or PDF bank statement and instantly see your income, spending, recu
 
 Reading a bank statement line by line is slow and easy to get wrong. This tool does the tedious part for you:
 
-- **Reads your statement** — works with CSV files, normal (digital) PDFs, and even scanned/photographed PDFs (it reads the text from the image automatically).
+- **Reads your statement** — works with CSV, Excel (`.xlsx`/`.xls`), OFX/QFX, normal (digital) PDFs, and even scanned/photographed PDFs (it reads the text from the image automatically).
 - **Shows the big picture** — total money in, total money out, and what's left, with simple monthly charts.
 - **Finds who you pay the most** — your biggest expenses and income sources, grouped so the same shop or person isn't split into ten different lines.
 - **Spots recurring bills** — subscriptions and regular payments (weekly, monthly, or yearly) so nothing sneaks past you.
@@ -38,9 +38,10 @@ Reading a bank statement line by line is slow and easy to get wrong. This tool d
 | Format | Notes |
 |--------|--------|
 | **CSV** | Columns are auto-detected, with a manual mapping step to confirm |
+| **Excel (.xlsx / .xls)** | First worksheet is read, header row auto-detected, then reuses the CSV mapping step |
+| **OFX / QFX** | Structured banking format — transactions are read directly, no mapping needed |
 | **Digital PDF** | Text is extracted directly from the PDF |
 | **Scanned PDF** | Falls back to on-device OCR (image-to-text) when there's no text layer |
-| **OPay PDF** | Extra parsing tuned for the OPay statement layout |
 
 ### Your privacy
 
@@ -60,6 +61,8 @@ A **local-first, offline-capable** single-page app. There is deliberately no bac
 | Styling | **Tailwind CSS v4** (via `@tailwindcss/vite`) + small shadcn-style UI primitives |
 | Analytics engine | **[DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview)** — a full columnar OLAP SQL database running in a Web Worker |
 | CSV parsing | **Papa Parse** (in a Web Worker) |
+| Excel parsing | **SheetJS (`xlsx`)**, lazy-loaded and converted into the CSV pipeline |
+| OFX / QFX | Custom tolerant SGML/XML parser (no dependency) |
 | PDF text | **pdf.js** (`pdfjs-dist`, worker-based) |
 | OCR | **Tesseract.js** (in a Web Worker, lazy-loaded) |
 | Tables / charts | **@tanstack/react-table** + **@tanstack/react-virtual**, **Recharts** |
@@ -97,6 +100,8 @@ flowchart TD
 - *CSV:* headers are parsed and run through a heuristic column detector (`src/lib/column-detect.ts`) that suggests date/description/amount/balance mappings; the user confirms via a mapping UI before rows are normalized.
 - *Digital PDF:* `pdf.js` extracts the text layer page by page (yielding to the event loop every few pages to stay responsive), then a text parser turns lines into rows.
 - *Scanned PDF:* when little/no text is found (`has_text_layer` heuristic), pages are rasterized to images and passed to the Tesseract worker for OCR, with per-page progress reported back to the UI.
+- *Excel:* the first worksheet is read with SheetJS, a heuristic finds the real header row (skipping bank title/metadata rows), and it's converted to CSV so it reuses the exact same column-mapping and conversion path as a `.csv` upload.
+- *OFX / QFX:* a tolerant parser reads the `<STMTTRN>` blocks (`DTPOSTED`, `TRNAMT`, `NAME`/`MEMO`) directly into transactions — no column mapping needed — and picks up the account currency from `CURDEF`.
 
 ### Analysis algorithms
 
@@ -120,7 +125,7 @@ src/
 ├── db/duckdb.ts            # DuckDB-WASM setup, schema, all SQL queries
 ├── workers/                # CSV, OCR (off-main-thread)
 ├── lib/
-│   ├── parsers/            # csv, pdf, opay, shared, pdf-render
+│   ├── parsers/            # csv, excel, ofx, pdf, statement-text, shared, pdf-render
 │   ├── column-detect.ts    # CSV column auto-detection
 │   ├── normalize.ts        # dates, amounts, fingerprints
 │   ├── duplicates.ts       # exact + fuzzy duplicate detection

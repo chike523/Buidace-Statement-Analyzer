@@ -1,6 +1,6 @@
 import '@/lib/polyfills'
 import type { ParsedRow } from '@/types/transaction'
-import { parseGenericText } from '@/lib/parsers/opay'
+import { parseGenericText } from '@/lib/parsers/statement-text'
 import { rowsToTransactions } from '@/lib/parsers/shared'
 
 export type PdfParseOutput = {

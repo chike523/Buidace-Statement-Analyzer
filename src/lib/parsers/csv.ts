@@ -78,8 +78,12 @@ export function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
   })
 }
 
-export function detectFileType(file: File): 'csv' | 'pdf' {
+export type ImportFileType = 'csv' | 'pdf' | 'excel' | 'ofx'
+
+export function detectFileType(file: File): ImportFileType {
   const ext = file.name.split('.').pop()?.toLowerCase()
   if (ext === 'csv' || ext === 'tsv' || file.type === 'text/csv') return 'csv'
+  if (ext === 'xlsx' || ext === 'xls') return 'excel'
+  if (ext === 'ofx' || ext === 'qfx') return 'ofx'
   return 'pdf'
 }

@@ -44,11 +44,15 @@ import { detectInternalTransfers, getTransferTransactionIds } from '@/lib/transf
 import { generateId } from '@/lib/utils'
 import type { ImportSummary } from '@/lib/import-helpers'
 
+type ImportFileType = 'csv' | 'pdf' | 'excel' | 'ofx'
+
 type PendingImport = {
   id: string
   file: File
-  fileType: 'csv' | 'pdf'
+  fileType: ImportFileType
   parseResult?: ParseResult
+  /** For Excel imports: the worksheet converted to CSV text, fed into the CSV pipeline. */
+  csvContent?: string
   pdfRows?: { date: string; description: string; amount: number; raw_source: string }[]
   pdfMeta?: { page_count: number; has_text_layer: boolean; raw_text_preview: string }
   status: 'pending' | 'parsing' | 'ready' | 'importing' | 'done' | 'error'
@@ -70,7 +74,7 @@ type AppContextValue = {
   filteredCount: number
   refreshData: () => Promise<void>
   createAccount: (name: string, currency?: string) => Promise<Account>
-  addPendingImport: (file: File, fileType: 'csv' | 'pdf') => string
+  addPendingImport: (file: File, fileType: ImportFileType) => string
   updatePendingImport: (id: string, update: Partial<PendingImport>) => void
   removePendingImport: (id: string) => void
   importCsv: (
@@ -202,7 +206,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return account
   }, [])
 
-  const addPendingImport = useCallback((file: File, fileType: 'csv' | 'pdf'): string => {
+  const addPendingImport = useCallback((file: File, fileType: ImportFileType): string => {
     const id = generateId()
     setPendingImports((prev) => [
       ...prev,

@@ -4,22 +4,30 @@ import { Badge } from '@/components/ui/badge'
 type PdfPreviewProps = {
   rows: { date: string; description: string; amount: number; raw_source?: string }[]
   meta: { page_count: number; has_text_layer: boolean; raw_text_preview: string }
+  /** When set (e.g. OFX/QFX), shows this label instead of PDF page/text-layer badges. */
+  sourceLabel?: string
 }
 
-export function PdfPreview({ rows, meta }: PdfPreviewProps) {
+export function PdfPreview({ rows, meta, sourceLabel }: PdfPreviewProps) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        <Badge variant="outline">{meta.page_count} page(s)</Badge>
-        <Badge variant={meta.has_text_layer ? 'default' : 'secondary'}>
-          {meta.has_text_layer ? 'Digital text layer' : 'OCR extracted'}
-        </Badge>
+        {sourceLabel ? (
+          <Badge variant="default">{sourceLabel}</Badge>
+        ) : (
+          <>
+            <Badge variant="outline">{meta.page_count} page(s)</Badge>
+            <Badge variant={meta.has_text_layer ? 'default' : 'secondary'}>
+              {meta.has_text_layer ? 'Digital text layer' : 'OCR extracted'}
+            </Badge>
+          </>
+        )}
         <Badge variant="outline">{rows.length} transactions found</Badge>
       </div>
 
       {rows.length === 0 && (
         <p className="text-sm text-[var(--color-destructive)]">
-          No transactions detected. Try exporting CSV from your bank instead, or check that the PDF
+          No transactions detected. Try exporting CSV from your bank instead, or check that the file
           contains a transaction table.
         </p>
       )}

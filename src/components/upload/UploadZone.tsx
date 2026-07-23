@@ -6,7 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 import { detectFileType, parseCsvFile, readFileAsArrayBuffer, readFileAsText } from '@/lib/parsers/csv'
+import type { ImportFileType } from '@/lib/parsers/csv'
 import { parsePdfBuffer, runOcrOnPdf, parseOcrText } from '@/lib/parsers/pdf'
+import { excelToCsv } from '@/lib/parsers/excel'
+import { parseOfxText } from '@/lib/parsers/ofx'
 import { ColumnMapper } from '@/components/upload/ColumnMapper'
 import { PdfPreview } from '@/components/upload/PdfPreview'
 import { AccountPicker } from '@/components/accounts/AccountPicker'
@@ -42,6 +45,23 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
           const content = await readFileAsText(file)
           const result = await parseCsvFile(content, file.name)
           updatePendingImport(id, { status: 'ready', parseResult: result })
+        } else if (fileType === 'excel') {
+          const buffer = await readFileAsArrayBuffer(file)
+          const csvContent = await excelToCsv(buffer)
+          const result = await parseCsvFile(csvContent, file.name)
+          updatePendingImport(id, { status: 'ready', parseResult: result, csvContent })
+        } else if (fileType === 'ofx') {
+          const content = await readFileAsText(file)
+          const output = parseOfxText(content, file.name)
+          updatePendingImport(id, {
+            status: 'ready',
+            pdfRows: output.rows,
+            pdfMeta: {
+              page_count: 0,
+              has_text_layer: true,
+              raw_text_preview: output.raw_text_preview,
+            },
+          })
         } else {
           const buffer = await readFileAsArrayBuffer(file)
           let output = await parsePdfBuffer(buffer, file.name, (page, total) => {
@@ -122,7 +142,7 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
           <Upload className="mb-3 h-9 w-9 text-[var(--color-muted-foreground)]" />
           <p className="mb-1 font-medium">{compact ? 'Add another statement' : 'Drop your bank statement here'}</p>
           <p className="mb-4 text-center text-sm text-[var(--color-muted-foreground)]">
-            CSV works best · PDF supported · Nothing leaves your browser
+            CSV, Excel, PDF & OFX/QFX · Nothing leaves your browser
           </p>
           <Button onClick={() => inputRef.current?.click()} variant={compact ? 'outline' : 'default'}>
             Choose file
@@ -130,7 +150,7 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
           <input
             ref={inputRef}
             type="file"
-            accept=".csv,.tsv,.pdf,text/csv,application/pdf"
+            accept=".csv,.tsv,.pdf,.xlsx,.xls,.ofx,.qfx,text/csv,application/pdf"
             multiple
             className="hidden"
             onChange={(e) => handleFiles(e.target.files)}
@@ -145,7 +165,7 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
           hasAccounts={accounts.length > 0}
           onRemove={() => removePendingImport(imp.id)}
           onImportCsv={async (accountId, mapping) => {
-            const content = await readFileAsText(imp.file)
+            const content = imp.csvContent ?? (await readFileAsText(imp.file))
             await importCsv(imp.id, accountId, mapping, content)
           }}
           onImportPdf={async (accountId, rows) => {
@@ -161,10 +181,11 @@ type ImportCardProps = {
   imp: {
     id: string
     file: File
-    fileType: 'csv' | 'pdf'
+    fileType: ImportFileType
     status: string
     parseProgress?: number
     parseResult?: import('@/types/transaction').ParseResult
+    csvContent?: string
     pdfRows?: { date: string; description: string; amount: number; raw_source: string }[]
     pdfMeta?: { page_count: number; has_text_layer: boolean; raw_text_preview: string }
     error?: string
@@ -188,17 +209,19 @@ function ImportCard({ imp, hasAccounts, onRemove, onImportCsv, onImportPdf }: Im
     imp.pdfMeta?.raw_text_preview ?? imp.parseResult?.preview_rows?.[0]?.Description ?? '',
   )
 
+  const isCsvLike = imp.fileType === 'csv' || imp.fileType === 'excel'
+  const isRowsLike = imp.fileType === 'pdf' || imp.fileType === 'ofx'
+
   const rowCount = imp.pdfRows?.length ?? imp.parseResult?.total_rows ?? 0
   const canImport =
     accountId &&
-    ((imp.fileType === 'csv' && mapping) ||
-      (imp.fileType === 'pdf' && imp.pdfRows && imp.pdfRows.length > 0))
+    ((isCsvLike && mapping) || (isRowsLike && imp.pdfRows && imp.pdfRows.length > 0))
 
   const handleImport = async () => {
     if (!canImport) return
     setImporting(true)
     try {
-      if (imp.fileType === 'csv' && mapping) {
+      if (isCsvLike && mapping) {
         await onImportCsv(accountId, mapping)
       } else if (imp.pdfRows) {
         await onImportPdf(accountId, imp.pdfRows)
@@ -213,10 +236,15 @@ function ImportCard({ imp, hasAccounts, onRemove, onImportCsv, onImportPdf }: Im
       <CardHeader className="border-b border-[var(--color-border)] bg-[var(--color-muted)]/30 pb-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            {imp.fileType === 'csv' ? (
+            {isCsvLike ? (
               <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
             ) : (
-              <FileText className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <FileText
+                className={cn(
+                  'mt-0.5 h-5 w-5 shrink-0',
+                  imp.fileType === 'ofx' ? 'text-blue-600' : 'text-red-600',
+                )}
+              />
             )}
             <div>
               <CardTitle className="text-base">{imp.file.name}</CardTitle>
@@ -257,11 +285,15 @@ function ImportCard({ imp, hasAccounts, onRemove, onImportCsv, onImportPdf }: Im
 
       {imp.status === 'ready' && (
         <CardContent className="space-y-5 pt-5">
-          {imp.fileType === 'pdf' && imp.pdfRows && imp.pdfMeta && (
-            <PdfPreview rows={imp.pdfRows} meta={imp.pdfMeta} />
+          {isRowsLike && imp.pdfRows && imp.pdfMeta && (
+            <PdfPreview
+              rows={imp.pdfRows}
+              meta={imp.pdfMeta}
+              sourceLabel={imp.fileType === 'ofx' ? 'Structured OFX/QFX' : undefined}
+            />
           )}
 
-          {imp.fileType === 'csv' && imp.parseResult && (
+          {isCsvLike && imp.parseResult && (
             <ColumnMapper
               headers={imp.parseResult.headers}
               previewRows={imp.parseResult.preview_rows}

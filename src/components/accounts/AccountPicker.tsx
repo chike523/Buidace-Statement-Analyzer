@@ -51,7 +51,7 @@ export function AccountPicker({
           </p>
         </div>
         <Input
-          placeholder="e.g. OPay, GTBank Savings"
+          placeholder="e.g. Main Account, GTBank Savings"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
