@@ -149,15 +149,16 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
   )
 
   const activeImports = pendingImports.filter((p) => p.status !== 'done')
-  const wizardStep = activeImports.some((p) => p.status === 'ready' || p.status === 'importing')
-    ? 2
-    : activeImports.some((p) => p.status === 'parsing')
-      ? 1
+  const wizardStep: 1 | 2 | 3 = activeImports.some((p) => p.status === 'importing')
+    ? 3
+    : activeImports.some((p) => p.status === 'ready')
+      ? 2
       : 1
 
   return (
     <div className="space-y-5">
-      {!compact && activeImports.length > 0 && <ImportSteps current={wizardStep as 1 | 2 | 3} />}
+      {/* Single progress indicator for the welcome upload flow (not when compact). */}
+      {!compact && <ImportSteps current={wizardStep} className="justify-center" />}
 
       <Card
         className={cn(
