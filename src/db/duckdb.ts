@@ -1,14 +1,12 @@
-import * as duckdb from '@duckdb/duckdb-wasm'
-import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url'
-import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url'
-import duckdb_wasm_eh from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url'
-import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'
+import type * as DuckDbWasm from '@duckdb/duckdb-wasm'
 import { aggregateMerchants } from '@/lib/merchant'
 import {
   clearPersistedSnapshot,
-  isPersistenceSupported as persistenceSupported,
+  isPersistenceEnabled,
+  isPersistenceSupported,
   loadPersistedSnapshot,
   savePersistedSnapshot,
+  setPersistenceFlag,
 } from '@/db/persistence'
 import type {
   Account,
@@ -23,42 +21,49 @@ import type {
   TransactionFilters,
 } from '@/types/transaction'
 
-const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
-  mvp: { mainModule: duckdb_wasm, mainWorker: mvp_worker },
-  eh: { mainModule: duckdb_wasm_eh, mainWorker: eh_worker },
-}
-
 /** Values that can be safely bound to a prepared statement. */
 type SqlParam = string | number | boolean | null
 
-const PERSIST_KEY = 'statement-analyzer:persist'
+type DuckDbModule = typeof import('@duckdb/duckdb-wasm')
 
-let dbInstance: duckdb.AsyncDuckDB | null = null
-let connInstance: duckdb.AsyncDuckDBConnection | null = null
+let duckdbMod: DuckDbModule | null = null
+let dbInstance: DuckDbWasm.AsyncDuckDB | null = null
+let connInstance: DuckDbWasm.AsyncDuckDBConnection | null = null
+let initPromise: Promise<DuckDbWasm.AsyncDuckDBConnection> | null = null
 
 /** True while restoring a persisted snapshot, so writes don't re-persist. */
 let restoring = false
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
-/** Whether this browser can persist data on-device. */
-export function isPersistenceSupported(): boolean {
-  return persistenceSupported()
-}
+export { isPersistenceEnabled, isPersistenceSupported }
 
-/** Whether the user has opted in to on-device persistence. */
-export function isPersistenceEnabled(): boolean {
-  try {
-    return localStorage.getItem(PERSIST_KEY) === 'true'
-  } catch {
-    return false
+/**
+ * Load only the WASM bundle this browser can run. Avoids referencing both the
+ * MVP (~40MB) and EH (~35MB) assets up-front so the unused one is never
+ * downloaded.
+ */
+async function resolveBundle(duckdb: DuckDbModule): Promise<DuckDbWasm.DuckDBBundle> {
+  const features = await duckdb.getPlatformFeatures()
+  if (features.wasmExceptions) {
+    const [mainModule, mainWorker] = await Promise.all([
+      import('@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url'),
+      import('@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'),
+    ])
+    return {
+      mainModule: mainModule.default,
+      mainWorker: mainWorker.default,
+      pthreadWorker: null,
+    }
   }
-}
 
-function setPersistFlag(enabled: boolean): void {
-  try {
-    localStorage.setItem(PERSIST_KEY, String(enabled))
-  } catch {
-    /* ignore storage errors (e.g. private mode) */
+  const [mainModule, mainWorker] = await Promise.all([
+    import('@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url'),
+    import('@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url'),
+  ])
+  return {
+    mainModule: mainModule.default,
+    mainWorker: mainWorker.default,
+    pthreadWorker: null,
   }
 }
 
@@ -107,19 +112,24 @@ function normalizeRowDate(value: unknown): string {
   return text.slice(0, 10)
 }
 
-async function getConnection(): Promise<duckdb.AsyncDuckDBConnection> {
+async function getConnection(): Promise<DuckDbWasm.AsyncDuckDBConnection> {
   if (connInstance) return connInstance
+  if (initPromise) return initPromise
 
-  const bundle = await duckdb.selectBundle(MANUAL_BUNDLES)
-  const worker = new Worker(bundle.mainWorker!)
-  const logger = new duckdb.ConsoleLogger()
-  const db = new duckdb.AsyncDuckDB(logger, worker)
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
+  initPromise = (async () => {
+    const duckdb = duckdbMod ?? (await import('@duckdb/duckdb-wasm'))
+    duckdbMod = duckdb
 
-  dbInstance = db
-  connInstance = await db.connect()
+    const bundle = await resolveBundle(duckdb)
+    const worker = new Worker(bundle.mainWorker!)
+    const logger = new duckdb.ConsoleLogger()
+    const db = new duckdb.AsyncDuckDB(logger, worker)
+    await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
 
-  await connInstance.query(`
+    dbInstance = db
+    connInstance = await db.connect()
+
+    await connInstance.query(`
     CREATE TABLE IF NOT EXISTS accounts (
       id VARCHAR PRIMARY KEY,
       name VARCHAR NOT NULL,
@@ -154,22 +164,28 @@ async function getConnection(): Promise<duckdb.AsyncDuckDBConnection> {
     );
   `)
 
-  // Restore any previously persisted data into the fresh in-memory database.
-  if (isPersistenceEnabled() && isPersistenceSupported()) {
-    try {
-      const snapshot = await loadPersistedSnapshot()
-      if (snapshot) {
-        restoring = true
-        await restoreDatabase(snapshot)
+    // Restore any previously persisted data into the fresh in-memory database.
+    if (isPersistenceEnabled() && isPersistenceSupported()) {
+      try {
+        const snapshot = await loadPersistedSnapshot()
+        if (snapshot) {
+          restoring = true
+          await restoreDatabase(snapshot)
+          restoring = false
+        }
+      } catch (err) {
         restoring = false
+        console.error('Failed to restore persisted data', err)
       }
-    } catch (err) {
-      restoring = false
-      console.error('Failed to restore persisted data', err)
     }
-  }
 
-  return connInstance
+    return connInstance
+  })().catch((err) => {
+    initPromise = null
+    throw err
+  })
+
+  return initPromise
 }
 
 /**
@@ -693,7 +709,7 @@ export async function setPersistenceEnabled(enabled: boolean): Promise<void> {
     throw new Error('On-device persistence is not supported in this browser')
   }
 
-  setPersistFlag(enabled)
+  setPersistenceFlag(enabled)
 
   if (enabled) {
     await persistNow()

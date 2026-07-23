@@ -1,5 +1,10 @@
-import { UploadZone } from '@/components/upload/UploadZone'
+import { Suspense, lazy } from 'react'
+import { Loader2 } from 'lucide-react'
 import { ImportSteps } from '@/components/upload/ImportSteps'
+
+const UploadZone = lazy(() =>
+  import('@/components/upload/UploadZone').then((m) => ({ default: m.UploadZone })),
+)
 
 export function WelcomeHero() {
   return (
@@ -17,7 +22,15 @@ export function WelcomeHero() {
       </div>
 
       <ImportSteps current={1} className="mb-6 justify-center" />
-      <UploadZone />
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center rounded-lg border border-dashed border-[var(--color-border)] py-16 text-[var(--color-muted-foreground)]">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        }
+      >
+        <UploadZone />
+      </Suspense>
     </div>
   )
 }

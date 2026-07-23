@@ -23,10 +23,29 @@ const DB_NAME = 'statement-analyzer'
 const DB_VERSION = 1
 const STORE = 'kv'
 const SNAPSHOT_KEY = 'snapshot'
+const PERSIST_KEY = 'statement-analyzer:persist'
 
 /** Whether this browser can persist data on-device. */
 export function isPersistenceSupported(): boolean {
   return typeof indexedDB !== 'undefined'
+}
+
+/** Whether the user has opted in to on-device persistence. */
+export function isPersistenceEnabled(): boolean {
+  try {
+    return localStorage.getItem(PERSIST_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+/** Persist the opt-in flag (does not touch IndexedDB itself). */
+export function setPersistenceFlag(enabled: boolean): void {
+  try {
+    localStorage.setItem(PERSIST_KEY, String(enabled))
+  } catch {
+    /* ignore storage errors (e.g. private mode) */
+  }
 }
 
 function openIdb(): Promise<IDBDatabase> {

@@ -7,9 +7,6 @@ import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 import { detectFileType, parseCsvFile, readFileAsArrayBuffer, readFileAsText } from '@/lib/parsers/csv'
 import type { ImportFileType } from '@/lib/parsers/csv'
-import { parsePdfBuffer, runOcrOnPdf, parseOcrText } from '@/lib/parsers/pdf'
-import { excelToCsv } from '@/lib/parsers/excel'
-import { parseOfxText } from '@/lib/parsers/ofx'
 import { ColumnMapper } from '@/components/upload/ColumnMapper'
 import { PdfPreview } from '@/components/upload/PdfPreview'
 import { AccountPicker } from '@/components/accounts/AccountPicker'
@@ -70,12 +67,18 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
           const result = await parseCsvFile(content, file.name)
           updatePendingImport(id, { status: 'ready', parseResult: result })
         } else if (fileType === 'excel') {
-          const buffer = await readFileAsArrayBuffer(file)
+          const [{ excelToCsv }, buffer] = await Promise.all([
+            import('@/lib/parsers/excel'),
+            readFileAsArrayBuffer(file),
+          ])
           const csvContent = await excelToCsv(buffer)
           const result = await parseCsvFile(csvContent, file.name)
           updatePendingImport(id, { status: 'ready', parseResult: result, csvContent })
         } else if (fileType === 'ofx') {
-          const content = await readFileAsText(file)
+          const [{ parseOfxText }, content] = await Promise.all([
+            import('@/lib/parsers/ofx'),
+            readFileAsText(file),
+          ])
           const output = parseOfxText(content, file.name)
           updatePendingImport(id, {
             status: 'ready',
@@ -87,7 +90,10 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
             },
           })
         } else {
-          const buffer = await readFileAsArrayBuffer(file)
+          const [{ parsePdfBuffer, runOcrOnPdf, parseOcrText }, buffer] = await Promise.all([
+            import('@/lib/parsers/pdf'),
+            readFileAsArrayBuffer(file),
+          ])
           let output = await parsePdfBuffer(buffer, file.name, (page, total) => {
             updatePendingImport(id, {
               status: 'parsing',

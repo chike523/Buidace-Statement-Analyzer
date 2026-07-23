@@ -9,38 +9,22 @@ import {
 } from 'react'
 import type {
   Account,
+  AccountBreakdown,
   ColumnMapping,
   DashboardPreferences,
+  DashboardStats,
   DuplicateGroup,
   ImportBatch,
+  MonthlyFlow,
   ParseResult,
   RecurringPattern,
+  TopMerchant,
+  Transaction,
   TransactionFilters,
   TransferPair,
 } from '@/types/transaction'
-import {
-  getAccounts,
-  getAllTransactions,
-  getDashboardStats,
-  getDuplicateGroups,
-  getIgnoredTransactionIds,
-  getMonthlyFlow,
-  getTopMerchants,
-  getTopMerchantsByCredit,
-  getAccountBreakdown,
-  getRejectedTransferPairIds,
-  rejectTransferPair,
-  initDatabase,
-  isPersistenceEnabled,
-  isPersistenceSupported,
-  setPersistenceEnabled,
-  insertTransactions,
-  queryTransactions,
-  countTransactions,
-  saveDuplicateGroups,
-  upsertAccount,
-  getTransactionCount,
-} from '@/db/duckdb'
+import { isPersistenceEnabled, isPersistenceSupported } from '@/db/persistence'
+import { loadDuckDb } from '@/db/load'
 import { countPendingDuplicates } from '@/lib/duplicates'
 import { getTransferTransactionIds } from '@/lib/transfers'
 import { runAnalysis } from '@/lib/analysis-client'
@@ -150,22 +134,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const refreshData = useCallback(async (): Promise<number> => {
+    const db = await loadDuckDb()
     const [accts, ignored, count, rejectedPairs] = await Promise.all([
-      getAccounts(),
-      getIgnoredTransactionIds(),
-      getTransactionCount(),
-      getRejectedTransferPairIds(),
+      db.getAccounts(),
+      db.getIgnoredTransactionIds(),
+      db.getTransactionCount(),
+      db.getRejectedTransferPairIds(),
     ])
     setAccounts(accts)
     setIgnoredIds(ignored)
     setTransactionCount(count)
-    setFilteredCount(await countTransactions(filters, ignored))
+    setFilteredCount(await db.countTransactions(filters, ignored))
     setRejectedTransferPairIds(new Set(rejectedPairs))
 
     if (count > 0) {
-      const allTx = await getAllTransactions()
+      const allTx = await db.getAllTransactions()
       const visibleTx = allTx.filter((t) => !ignored.includes(t.id))
-      const existingGroups = await getDuplicateGroups()
+      const existingGroups = await db.getDuplicateGroups()
       const resolvedMap = new Map(
         existingGroups.filter((g) => g.status !== 'pending').map((g) => [g.fingerprint, g.status]),
       )
@@ -179,7 +164,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         status: resolvedMap.get(g.fingerprint) ?? g.status,
       }))
       setDuplicateGroups(groups)
-      await saveDuplicateGroups(groups)
+      await db.saveDuplicateGroups(groups)
       setRecurringPatterns(recurringPatterns)
       setTransferPairs(transferPairs)
       return countPendingDuplicates(groups)
@@ -192,15 +177,56 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [filters])
 
   useEffect(() => {
-    initDatabase()
-      .then(() => refreshData())
-      .then(() => setReady(true))
-      .catch(console.error)
+    let cancelled = false
+    const persistOn = isPersistenceEnabled()
+
+    // Session-only mode: paint the welcome UI immediately, then warm DuckDB
+    // in the background so the first import isn't stalled by WASM download.
+    if (!persistOn) {
+      setReady(true)
+    }
+
+    const boot = async () => {
+      const db = await loadDuckDb()
+      await db.initDatabase()
+      if (cancelled) return
+      await refreshData()
+      if (cancelled) return
+      if (persistOn) setReady(true)
+    }
+
+    const scheduleWarm = () => {
+      void boot().catch(console.error)
+    }
+
+    if (persistOn) {
+      scheduleWarm()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(scheduleWarm, { timeout: 1500 })
+      return () => {
+        cancelled = true
+        window.cancelIdleCallback(id)
+      }
+    }
+
+    const timer = setTimeout(scheduleWarm, 50)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+    // Boot once on mount. refreshData is stable enough for the initial load;
+    // later filter changes go through the dedicated count effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     if (!ready) return
-    countTransactions(filters, ignoredIds).then(setFilteredCount)
+    void loadDuckDb().then((db) => db.countTransactions(filters, ignoredIds).then(setFilteredCount))
   }, [filters, ignoredIds, ready, transactionCount])
 
   const setFilters = useCallback((update: Partial<TransactionFilters>) => {
@@ -212,7 +238,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const rejectTransfer = useCallback(async (pairId: string) => {
-    await rejectTransferPair(pairId)
+    const db = await loadDuckDb()
+    await db.rejectTransferPair(pairId)
     setRejectedTransferPairIds((prev) => new Set([...prev, pairId]))
   }, [])
 
@@ -220,7 +247,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (enabled: boolean) => {
       setPersistenceBusy(true)
       try {
-        await setPersistenceEnabled(enabled)
+        const db = await loadDuckDb()
+        await db.setPersistenceEnabled(enabled)
         setPersistenceEnabledState(enabled)
         await refreshData()
       } finally {
@@ -231,8 +259,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const createAccount = useCallback(async (name: string, currency = 'USD') => {
+    const db = await loadDuckDb()
     const account: Account = { id: generateId(), name, currency }
-    await upsertAccount(account)
+    await db.upsertAccount(account)
     setAccounts((prev) => [...prev, account])
     return account
   }, [])
@@ -269,7 +298,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const account = accounts.find((a) => a.id === accountId)
       updatePendingImport(pendingId, { status: 'importing' })
       const batchId = generateId()
-      const { convertCsvToTransactions } = await import('@/lib/parsers/csv')
+      const [{ convertCsvToTransactions }, db] = await Promise.all([
+        import('@/lib/parsers/csv'),
+        loadDuckDb(),
+      ])
       const { transactions, skipped, errors } = await convertCsvToTransactions(
         content,
         pending.file.name,
@@ -279,7 +311,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         account?.currency ?? 'USD',
       )
 
-      await insertTransactions(transactions)
+      await db.insertTransactions(transactions)
       setImportBatches((prev) => [
         ...prev,
         {
@@ -318,7 +350,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const account = accounts.find((a) => a.id === accountId)
       updatePendingImport(pendingId, { status: 'importing' })
       const batchId = generateId()
-      const { pdfRowsToTransactions } = await import('@/lib/parsers/pdf')
+      const [{ pdfRowsToTransactions }, db] = await Promise.all([
+        import('@/lib/parsers/pdf'),
+        loadDuckDb(),
+      ])
       const transactions = await pdfRowsToTransactions(
         rows,
         accountId,
@@ -326,7 +361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         account?.currency ?? 'USD',
       )
 
-      await insertTransactions(transactions)
+      await db.insertTransactions(transactions)
       setImportBatches((prev) => [
         ...prev,
         {
@@ -354,11 +389,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const resolveDuplicate = useCallback(
     async (groupId: string, status: 'keep_both' | 'ignored') => {
+      const db = await loadDuckDb()
       const updated = duplicateGroups.map((g) =>
         g.id === groupId ? { ...g, status } : g,
       )
       setDuplicateGroups(updated)
-      await saveDuplicateGroups(updated)
+      await db.saveDuplicateGroups(updated)
       await refreshData()
     },
     [duplicateGroups, refreshData],
@@ -448,12 +484,12 @@ export function useApp() {
 
 export function useDashboardData() {
   const { filters, ignoredIds, ready, transactionCount, dashboardPrefs, transferIds } = useApp()
-  const [stats, setStats] = useState<Awaited<ReturnType<typeof getDashboardStats>> | null>(null)
-  const [grossStats, setGrossStats] = useState<Awaited<ReturnType<typeof getDashboardStats>> | null>(null)
-  const [monthly, setMonthly] = useState<Awaited<ReturnType<typeof getMonthlyFlow>>>([])
-  const [merchants, setMerchants] = useState<Awaited<ReturnType<typeof getTopMerchants>>>([])
-  const [creditMerchants, setCreditMerchants] = useState<Awaited<ReturnType<typeof getTopMerchantsByCredit>>>([])
-  const [breakdown, setBreakdown] = useState<Awaited<ReturnType<typeof getAccountBreakdown>>>([])
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [grossStats, setGrossStats] = useState<DashboardStats | null>(null)
+  const [monthly, setMonthly] = useState<MonthlyFlow[]>([])
+  const [merchants, setMerchants] = useState<TopMerchant[]>([])
+  const [creditMerchants, setCreditMerchants] = useState<TopMerchant[]>([])
+  const [breakdown, setBreakdown] = useState<AccountBreakdown[]>([])
   const [loading, setLoading] = useState(false)
 
   const excludeTransferIds = useMemo(
@@ -475,22 +511,25 @@ export function useDashboardData() {
 
     let cancelled = false
     setLoading(true)
-    Promise.all([
-      getDashboardStats(filters, ignoredIds, excludeTransferIds),
-      dashboardPrefs.exclude_transfers && transferIds.length > 0
-        ? getDashboardStats(filters, ignoredIds, EMPTY_EXCLUDE_IDS)
-        : Promise.resolve(null),
-      getMonthlyFlow(filters, ignoredIds, excludeTransferIds),
-      getTopMerchants(filters, ignoredIds, 10, {
-        excludeTransactionIds: excludeTransferIds,
-        merchantMode,
-      }),
-      getTopMerchantsByCredit(filters, ignoredIds, 10, {
-        excludeTransactionIds: excludeTransferIds,
-        merchantMode,
-      }),
-      getAccountBreakdown(filters, ignoredIds, excludeTransferIds),
-    ])
+    void loadDuckDb()
+      .then((db) =>
+        Promise.all([
+          db.getDashboardStats(filters, ignoredIds, excludeTransferIds),
+          dashboardPrefs.exclude_transfers && transferIds.length > 0
+            ? db.getDashboardStats(filters, ignoredIds, EMPTY_EXCLUDE_IDS)
+            : Promise.resolve(null),
+          db.getMonthlyFlow(filters, ignoredIds, excludeTransferIds),
+          db.getTopMerchants(filters, ignoredIds, 10, {
+            excludeTransactionIds: excludeTransferIds,
+            merchantMode,
+          }),
+          db.getTopMerchantsByCredit(filters, ignoredIds, 10, {
+            excludeTransactionIds: excludeTransferIds,
+            merchantMode,
+          }),
+          db.getAccountBreakdown(filters, ignoredIds, excludeTransferIds),
+        ]),
+      )
       .then(([s, gross, m, t, c, b]) => {
         if (cancelled) return
         setStats(s)
@@ -514,7 +553,7 @@ export function useDashboardData() {
 
 export function useTransactions() {
   const { filters, ignoredIds, ready, transactionCount } = useApp()
-  const [transactions, setTransactions] = useState<Awaited<ReturnType<typeof queryTransactions>>>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -525,7 +564,8 @@ export function useTransactions() {
 
     const timer = setTimeout(() => {
       setLoading(true)
-      queryTransactions(filters, ignoredIds, 50000)
+      void loadDuckDb()
+        .then((db) => db.queryTransactions(filters, ignoredIds, 50000))
         .then(setTransactions)
         .finally(() => setLoading(false))
     }, 150)

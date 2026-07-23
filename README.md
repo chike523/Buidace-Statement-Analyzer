@@ -100,7 +100,9 @@ flowchart TD
 
 **Defense-in-depth.** All SQL runs through parameterized prepared statements (no string interpolation). The production build ships a **Content-Security-Policy** (injected at build time in `vite.config.ts`) that disallows inline/`eval` scripts while still permitting WebAssembly and the specific CDN Tesseract needs for OCR. Uploads are size-capped (25 MB for CSV/Excel/OFX, 50 MB for PDF) to avoid freezing the tab.
 
-**Everything heavy runs off the main thread.** CSV parsing, OCR, PDF.js, DuckDB, and the **duplicate/recurring/transfer detection** each run in **Web Workers**, so the UI never freezes during a big import. Expensive modules (Tesseract, pdf.js, xlsx, the CSV/PDF parsers) are **lazily `import()`-ed** and code-split, so the initial bundle stays small and OCR is only downloaded if a scanned PDF actually needs it.
+**Everything heavy runs off the main thread.** CSV parsing, OCR, PDF.js, DuckDB, and the **duplicate/recurring/transfer detection** each run in **Web Workers**, so the UI never freezes during a big import. Expensive modules (Tesseract, pdf.js, xlsx, the CSV/PDF parsers, dashboard charts) are **lazily `import()`-ed** and code-split, so the initial bundle stays small and OCR is only downloaded if a scanned PDF actually needs it.
+
+**First paint before DuckDB.** The welcome screen paints without waiting for the ~35MB DuckDB WASM download. Session-only mode marks the app ready immediately and warms DuckDB on idle; with "Save on device" on, boot waits only long enough to restore IndexedDB data. Only the WASM variant this browser supports (EH or MVP) is fetched.
 
 The detection passes are also **bucketed** to avoid quadratic blow-up: fuzzy duplicate matching only compares transactions sharing an account + date, and transfer matching indexes credits by amount (in cents), so each debit scans a handful of candidates instead of every credit.
 
