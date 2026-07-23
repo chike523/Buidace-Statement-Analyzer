@@ -31,6 +31,9 @@ import {
   getRejectedTransferPairIds,
   rejectTransferPair,
   initDatabase,
+  isPersistenceEnabled,
+  isPersistenceSupported,
+  setPersistenceEnabled,
   insertTransactions,
   queryTransactions,
   countTransactions,
@@ -96,6 +99,10 @@ type AppContextValue = {
   transferIds: string[]
   rejectedTransferPairIds: Set<string>
   rejectTransfer: (pairId: string) => Promise<void>
+  persistenceSupported: boolean
+  persistenceEnabled: boolean
+  persistenceBusy: boolean
+  setPersistence: (enabled: boolean) => Promise<void>
 }
 
 const defaultDashboardPrefs = (): DashboardPreferences => ({
@@ -133,6 +140,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dashboardPrefs, setDashboardPrefsState] = useState<DashboardPreferences>(defaultDashboardPrefs)
   const [transferPairs, setTransferPairs] = useState<TransferPair[]>([])
   const [rejectedTransferPairIds, setRejectedTransferPairIds] = useState<Set<string>>(new Set())
+  const [persistenceSupported] = useState(isPersistenceSupported)
+  const [persistenceEnabled, setPersistenceEnabledState] = useState(isPersistenceEnabled)
+  const [persistenceBusy, setPersistenceBusy] = useState(false)
 
   const transferIds = useMemo(
     () => Array.from(getTransferTransactionIds(transferPairs, rejectedTransferPairIds)),
@@ -205,6 +215,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await rejectTransferPair(pairId)
     setRejectedTransferPairIds((prev) => new Set([...prev, pairId]))
   }, [])
+
+  const setPersistence = useCallback(
+    async (enabled: boolean) => {
+      setPersistenceBusy(true)
+      try {
+        await setPersistenceEnabled(enabled)
+        setPersistenceEnabledState(enabled)
+        await refreshData()
+      } finally {
+        setPersistenceBusy(false)
+      }
+    },
+    [refreshData],
+  )
 
   const createAccount = useCallback(async (name: string, currency = 'USD') => {
     const account: Account = { id: generateId(), name, currency }
@@ -372,6 +396,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       transferIds,
       rejectedTransferPairIds,
       rejectTransfer,
+      persistenceSupported,
+      persistenceEnabled,
+      persistenceBusy,
+      setPersistence,
     }),
     [
       ready,
@@ -402,6 +430,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       transferIds,
       rejectedTransferPairIds,
       rejectTransfer,
+      persistenceSupported,
+      persistenceEnabled,
+      persistenceBusy,
+      setPersistence,
     ],
   )
 

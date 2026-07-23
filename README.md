@@ -45,7 +45,9 @@ Reading a bank statement line by line is slow and easy to get wrong. This tool d
 
 ### Your privacy
 
-Everything happens locally. The app has no server that receives your data, and the data lives only in the current browser tab — close the tab and it's gone. The report you export is generated on your machine; nothing is uploaded when you create or download it.
+Everything happens locally. The app has no server that receives your data. By default the data lives only in the current browser tab — close the tab and it's gone. The report you export is generated on your machine; nothing is uploaded when you create or download it.
+
+If you'd rather not re-import every visit, flip the **"Save on device"** switch in the top-right. Your statements are then saved **in your own browser** (never sent anywhere) and reloaded automatically next time. Turn it off and the saved copy is deleted immediately.
 
 ---
 
@@ -92,7 +94,9 @@ flowchart TD
 
 **State & data flow.** A single React context (`src/context/AppContext.tsx`) owns app state and orchestrates the import → store → analyze → render loop. Data-fetching hooks (`useDashboardData`, `useTransactions`) subscribe to filters and re-query DuckDB, with cancellation guards and debouncing so rapid filter changes don't pile up work.
 
-**In-browser SQL with DuckDB-WASM.** Instead of hand-rolling aggregations in JavaScript, transactions are loaded into an in-memory DuckDB instance (`src/db/duckdb.ts`) and all dashboard numbers — totals, monthly cash flow, top payees, per-account breakdowns — are computed with real SQL (`GROUP BY`, window functions, `strftime`). The schema (`accounts`, `transactions`, `duplicate_groups`, `duplicate_members`, `transfer_rejections`) lives only in the session; nothing is persisted to disk. Inserts are batched (500 rows/statement) to keep large imports fast.
+**In-browser SQL with DuckDB-WASM.** Instead of hand-rolling aggregations in JavaScript, transactions are loaded into an in-memory DuckDB instance (`src/db/duckdb.ts`) and all dashboard numbers — totals, monthly cash flow, top payees, per-account breakdowns — are computed with real SQL (`GROUP BY`, window functions, `strftime`). The schema (`accounts`, `transactions`, `duplicate_groups`, `duplicate_members`, `transfer_rejections`) lives in the session. All queries and inserts use **parameterized prepared statements** (no string interpolation), and bulk inserts run inside a single transaction for speed and atomicity.
+
+**Opt-in on-device persistence.** By default the database is purely in-memory. When the user enables "Save on device", the domain data is mirrored into **IndexedDB** (`src/db/persistence.ts`) after every change (debounced) and restored into a fresh in-memory DuckDB on the next load. IndexedDB is used rather than DuckDB's OPFS backend because OPFS holds an exclusive `SyncAccessHandle` that is only released on garbage collection, which makes it unreliable across page reloads; IndexedDB has no such locking and works in every modern browser.
 
 **Everything heavy runs off the main thread.** CSV parsing, OCR, PDF.js, DuckDB, and the **duplicate/recurring/transfer detection** each run in **Web Workers**, so the UI never freezes during a big import. Expensive modules (Tesseract, pdf.js, xlsx, the CSV/PDF parsers) are **lazily `import()`-ed** and code-split, so the initial bundle stays small and OCR is only downloaded if a scanned PDF actually needs it.
 
@@ -124,7 +128,9 @@ The analytical logic lives in pure, testable functions under `src/lib/`:
 src/
 ├── App.tsx                 # Shell, tabs, top-level layout
 ├── context/AppContext.tsx  # Central state + import/analyze orchestration
-├── db/duckdb.ts            # DuckDB-WASM setup, schema, all SQL queries
+├── db/
+│   ├── duckdb.ts           # DuckDB-WASM setup, schema, all SQL queries
+│   └── persistence.ts      # opt-in IndexedDB snapshot/restore
 ├── workers/                # CSV, OCR, analysis (off-main-thread)
 ├── lib/
 │   ├── analysis-client.ts  # posts detection work to the analysis worker

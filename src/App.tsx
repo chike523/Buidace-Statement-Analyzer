@@ -12,6 +12,7 @@ import { ReviewPanel } from '@/components/review/ReviewPanel'
 import { WelcomeHero } from '@/components/onboarding/WelcomeHero'
 import { ImportSuccessToast } from '@/components/layout/AppChrome'
 import { ExportReportButton } from '@/components/report/ExportReportButton'
+import { PersistenceToggle } from '@/components/layout/PersistenceToggle'
 import { countPendingDuplicates } from '@/lib/duplicates'
 
 function AppContent() {
@@ -73,15 +74,18 @@ function AppContent() {
                 : 'Import a statement to get started'}
             </p>
           </div>
-          {hasData && (
-            <div className="flex items-center gap-2">
-              <ExportReportButton />
-              <Button variant="outline" size="sm" onClick={() => setActiveTab('upload')}>
-                <Upload className="mr-1.5 h-3.5 w-3.5" />
-                Import
-              </Button>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            <PersistenceToggle />
+            {hasData && (
+              <>
+                <ExportReportButton />
+                <Button variant="outline" size="sm" onClick={() => setActiveTab('upload')}>
+                  <Upload className="mr-1.5 h-3.5 w-3.5" />
+                  Import
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 

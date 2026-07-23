@@ -4,6 +4,12 @@ import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?ur
 import duckdb_wasm_eh from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url'
 import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'
 import { aggregateMerchants } from '@/lib/merchant'
+import {
+  clearPersistedSnapshot,
+  isPersistenceSupported as persistenceSupported,
+  loadPersistedSnapshot,
+  savePersistedSnapshot,
+} from '@/db/persistence'
 import type {
   Account,
   AccountBreakdown,
@@ -25,8 +31,60 @@ const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
 /** Values that can be safely bound to a prepared statement. */
 type SqlParam = string | number | boolean | null
 
+const PERSIST_KEY = 'statement-analyzer:persist'
+
 let dbInstance: duckdb.AsyncDuckDB | null = null
 let connInstance: duckdb.AsyncDuckDBConnection | null = null
+
+/** True while restoring a persisted snapshot, so writes don't re-persist. */
+let restoring = false
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Whether this browser can persist data on-device. */
+export function isPersistenceSupported(): boolean {
+  return persistenceSupported()
+}
+
+/** Whether the user has opted in to on-device persistence. */
+export function isPersistenceEnabled(): boolean {
+  try {
+    return localStorage.getItem(PERSIST_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function setPersistFlag(enabled: boolean): void {
+  try {
+    localStorage.setItem(PERSIST_KEY, String(enabled))
+  } catch {
+    /* ignore storage errors (e.g. private mode) */
+  }
+}
+
+/** Write the current database contents to IndexedDB immediately. */
+async function persistNow(): Promise<void> {
+  if (!isPersistenceEnabled() || !isPersistenceSupported()) return
+  try {
+    const snapshot = await snapshotDatabase()
+    await savePersistedSnapshot(snapshot)
+  } catch (err) {
+    console.error('Failed to persist data', err)
+  }
+}
+
+/**
+ * Debounced persistence. Data-mutating operations call this so a burst of
+ * writes (e.g. a bulk import) results in a single snapshot write.
+ */
+function schedulePersist(): void {
+  if (restoring || !isPersistenceEnabled() || !isPersistenceSupported()) return
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    void persistNow()
+  }, 400)
+}
 
 function normalizeRowDate(value: unknown): string {
   if (value == null) return ''
@@ -57,6 +115,7 @@ async function getConnection(): Promise<duckdb.AsyncDuckDBConnection> {
   const logger = new duckdb.ConsoleLogger()
   const db = new duckdb.AsyncDuckDB(logger, worker)
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
+
   dbInstance = db
   connInstance = await db.connect()
 
@@ -94,6 +153,21 @@ async function getConnection(): Promise<duckdb.AsyncDuckDBConnection> {
       pair_id VARCHAR PRIMARY KEY
     );
   `)
+
+  // Restore any previously persisted data into the fresh in-memory database.
+  if (isPersistenceEnabled() && isPersistenceSupported()) {
+    try {
+      const snapshot = await loadPersistedSnapshot()
+      if (snapshot) {
+        restoring = true
+        await restoreDatabase(snapshot)
+        restoring = false
+      }
+    } catch (err) {
+      restoring = false
+      console.error('Failed to restore persisted data', err)
+    }
+  }
 
   return connInstance
 }
@@ -184,6 +258,7 @@ export async function upsertAccount(account: Account): Promise<void> {
     `INSERT OR REPLACE INTO accounts (id, name, currency) VALUES (?, ?, ?)`,
     [account.id, account.name, account.currency],
   )
+  schedulePersist()
 }
 
 export async function getAccounts(): Promise<Account[]> {
@@ -227,6 +302,7 @@ export async function insertTransactions(transactions: Transaction[]): Promise<v
   } finally {
     await stmt.close()
   }
+  schedulePersist()
 }
 
 function mapTransactionRow(row: Record<string, unknown>): Transaction {
@@ -496,7 +572,10 @@ export async function saveDuplicateGroups(groups: DuplicateGroup[]): Promise<voi
   await conn.query('DELETE FROM duplicate_groups')
   await conn.query('DELETE FROM duplicate_members')
 
-  if (groups.length === 0) return
+  if (groups.length === 0) {
+    schedulePersist()
+    return
+  }
 
   const groupStmt = await conn.prepare(
     `INSERT INTO duplicate_groups (id, fingerprint, status) VALUES (?, ?, ?)`,
@@ -515,6 +594,7 @@ export async function saveDuplicateGroups(groups: DuplicateGroup[]): Promise<voi
     await groupStmt.close()
     await memberStmt.close()
   }
+  schedulePersist()
 }
 
 export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
@@ -566,8 +646,62 @@ export async function getRejectedTransferPairIds(): Promise<string[]> {
 
 export async function rejectTransferPair(pairId: string): Promise<void> {
   await runQuery(`INSERT OR REPLACE INTO transfer_rejections (pair_id) VALUES (?)`, [pairId])
+  schedulePersist()
 }
 
 export async function unrejectTransferPair(pairId: string): Promise<void> {
   await runQuery(`DELETE FROM transfer_rejections WHERE pair_id = ?`, [pairId])
+  schedulePersist()
+}
+
+type DatabaseSnapshot = {
+  accounts: Account[]
+  transactions: Transaction[]
+  duplicateGroups: DuplicateGroup[]
+  rejectedPairs: string[]
+}
+
+async function snapshotDatabase(): Promise<DatabaseSnapshot> {
+  const [accounts, transactions, duplicateGroups, rejectedPairs] = await Promise.all([
+    getAccounts(),
+    getAllTransactions(),
+    getDuplicateGroups(),
+    getRejectedTransferPairIds(),
+  ])
+  return { accounts, transactions, duplicateGroups, rejectedPairs }
+}
+
+async function restoreDatabase(snapshot: DatabaseSnapshot): Promise<void> {
+  for (const account of snapshot.accounts) {
+    await upsertAccount(account)
+  }
+  await insertTransactions(snapshot.transactions)
+  await saveDuplicateGroups(snapshot.duplicateGroups)
+  for (const pairId of snapshot.rejectedPairs) {
+    await rejectTransferPair(pairId)
+  }
+}
+
+/**
+ * Toggle on-device persistence. The in-memory database is untouched; enabling
+ * writes the current data to IndexedDB (and keeps it in sync afterwards), while
+ * disabling removes the stored copy so nothing is left on the device.
+ */
+export async function setPersistenceEnabled(enabled: boolean): Promise<void> {
+  if (enabled === isPersistenceEnabled()) return
+  if (enabled && !isPersistenceSupported()) {
+    throw new Error('On-device persistence is not supported in this browser')
+  }
+
+  setPersistFlag(enabled)
+
+  if (enabled) {
+    await persistNow()
+  } else {
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    await clearPersistedSnapshot()
+  }
 }
