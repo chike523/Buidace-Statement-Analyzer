@@ -75,7 +75,7 @@ export function Dashboard() {
   }))
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 overflow-x-hidden">
       <div className="flex flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:px-4">
         {showTransferToggle && (
           <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm sm:min-h-0">
@@ -137,12 +137,12 @@ export function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2 lg:gap-6">
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
             <CardTitle className="text-base">Monthly cash flow</CardTitle>
           </CardHeader>
-          <CardContent className="h-56 min-h-56 sm:h-72 sm:min-h-72">
+          <CardContent className="h-56 min-h-56 overflow-hidden sm:h-72 sm:min-h-72">
             {chartData.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[var(--color-muted-foreground)]">
                 No monthly data for the current filters.
@@ -167,11 +167,11 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
             <CardTitle className="text-base">Net flow trend</CardTitle>
           </CardHeader>
-          <CardContent className="h-56 min-h-56 sm:h-72 sm:min-h-72">
+          <CardContent className="h-56 min-h-56 overflow-hidden sm:h-72 sm:min-h-72">
             {chartData.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[var(--color-muted-foreground)]">
                 No monthly data for the current filters.
@@ -202,15 +202,15 @@ export function Dashboard() {
         </Card>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2 lg:gap-6">
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
             <CardTitle className="text-base">Top payees by spend</CardTitle>
             {dashboardPrefs.merchant_mode === 'smart' && (
               <CardDescription>Grouped by payee</CardDescription>
             )}
           </CardHeader>
-          <CardContent>
+          <CardContent className="min-w-0 overflow-hidden p-4 pt-0 sm:p-6 sm:pt-0">
             <MerchantList
               merchants={merchants}
               currency={currency}
@@ -222,14 +222,14 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
             <CardTitle className="text-base">Top payees by income</CardTitle>
             {dashboardPrefs.merchant_mode === 'smart' && (
               <CardDescription>Grouped by payee</CardDescription>
             )}
           </CardHeader>
-          <CardContent>
+          <CardContent className="min-w-0 overflow-hidden p-4 pt-0 sm:p-6 sm:pt-0">
             <MerchantList
               merchants={creditMerchants}
               currency={currency}
