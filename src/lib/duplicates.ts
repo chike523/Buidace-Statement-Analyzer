@@ -46,14 +46,25 @@ export function detectDuplicates(
   const usedIds = new Set(groups.flatMap((g) => g.transaction_ids))
   const remaining = transactions.filter((t) => !usedIds.has(t.id))
 
+  // Fuzzy matches require the same account + date + amount, so only compare
+  // within account/date buckets instead of every pair (O(n^2) -> O(sum k^2)).
+  // Iterating bucket-mates in their original order preserves exact output.
+  const bucketIndices = new Map<string, number[]>()
+  remaining.forEach((t, idx) => {
+    const key = `${t.account_id}|${t.date}`
+    const arr = bucketIndices.get(key)
+    if (arr) arr.push(idx)
+    else bucketIndices.set(key, [idx])
+  })
+
   for (let i = 0; i < remaining.length; i++) {
     const a = remaining[i]
     const fuzzyMatches: Transaction[] = [a]
+    const mates = bucketIndices.get(`${a.account_id}|${a.date}`) ?? []
 
-    for (let j = i + 1; j < remaining.length; j++) {
+    for (const j of mates) {
+      if (j <= i) continue
       const b = remaining[j]
-      if (a.account_id !== b.account_id) continue
-      if (a.date !== b.date) continue
       if (Math.abs(Math.abs(a.amount) - Math.abs(b.amount)) > 0.01) continue
 
       const descA = normalizeDescription(a.description)

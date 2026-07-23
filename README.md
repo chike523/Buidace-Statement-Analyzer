@@ -94,7 +94,9 @@ flowchart TD
 
 **In-browser SQL with DuckDB-WASM.** Instead of hand-rolling aggregations in JavaScript, transactions are loaded into an in-memory DuckDB instance (`src/db/duckdb.ts`) and all dashboard numbers — totals, monthly cash flow, top payees, per-account breakdowns — are computed with real SQL (`GROUP BY`, window functions, `strftime`). The schema (`accounts`, `transactions`, `duplicate_groups`, `duplicate_members`, `transfer_rejections`) lives only in the session; nothing is persisted to disk. Inserts are batched (500 rows/statement) to keep large imports fast.
 
-**Everything heavy runs off the main thread.** CSV parsing, OCR, PDF.js, and DuckDB each run in **Web Workers**, so the UI never freezes during a big import. Expensive modules (Tesseract, pdf.js, the CSV/PDF parsers) are **lazily `import()`-ed** and code-split, so the initial bundle stays small and OCR is only downloaded if a scanned PDF actually needs it.
+**Everything heavy runs off the main thread.** CSV parsing, OCR, PDF.js, DuckDB, and the **duplicate/recurring/transfer detection** each run in **Web Workers**, so the UI never freezes during a big import. Expensive modules (Tesseract, pdf.js, xlsx, the CSV/PDF parsers) are **lazily `import()`-ed** and code-split, so the initial bundle stays small and OCR is only downloaded if a scanned PDF actually needs it.
+
+The detection passes are also **bucketed** to avoid quadratic blow-up: fuzzy duplicate matching only compares transactions sharing an account + date, and transfer matching indexes credits by amount (in cents), so each debit scans a handful of candidates instead of every credit.
 
 **Import pipeline.**
 - *CSV:* headers are parsed and run through a heuristic column detector (`src/lib/column-detect.ts`) that suggests date/description/amount/balance mappings; the user confirms via a mapping UI before rows are normalized.
@@ -123,8 +125,9 @@ src/
 ├── App.tsx                 # Shell, tabs, top-level layout
 ├── context/AppContext.tsx  # Central state + import/analyze orchestration
 ├── db/duckdb.ts            # DuckDB-WASM setup, schema, all SQL queries
-├── workers/                # CSV, OCR (off-main-thread)
+├── workers/                # CSV, OCR, analysis (off-main-thread)
 ├── lib/
+│   ├── analysis-client.ts  # posts detection work to the analysis worker
 │   ├── parsers/            # csv, excel, ofx, pdf, statement-text, shared, pdf-render
 │   ├── column-detect.ts    # CSV column auto-detection
 │   ├── normalize.ts        # dates, amounts, fingerprints

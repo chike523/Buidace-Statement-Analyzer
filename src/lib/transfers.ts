@@ -43,13 +43,30 @@ export function detectInternalTransfers(transactions: Transaction[]): TransferPa
   const usedCredit = new Set<string>()
   const pairs: TransferPair[] = []
 
+  // Index credits by amount in cents so each debit only scans amount-matching
+  // candidates instead of every credit (O(debits x credits) -> ~O(debits)).
+  // AMOUNT_TOLERANCE is one cent, so candidates live in the cent bucket +/- 1.
+  const centsOf = (amount: number) => Math.round(Math.abs(amount) * 100)
+  const creditsByCents = new Map<number, { credit: Transaction; idx: number }[]>()
+  credits.forEach((credit, idx) => {
+    const key = centsOf(credit.amount)
+    const arr = creditsByCents.get(key)
+    if (arr) arr.push({ credit, idx })
+    else creditsByCents.set(key, [{ credit, idx }])
+  })
+
   for (const debit of debits) {
     if (usedDebit.has(debit.id)) continue
 
     let best: { credit: Transaction; score: number; confidence: TransferPair['confidence'] } | null =
       null
 
-    for (const credit of credits) {
+    const dc = centsOf(debit.amount)
+    const candidates = [dc - 1, dc, dc + 1]
+      .flatMap((key) => creditsByCents.get(key) ?? [])
+      .sort((a, b) => a.idx - b.idx)
+
+    for (const { credit } of candidates) {
       if (usedCredit.has(credit.id)) continue
       if (!amountsMatch(debit.amount, credit.amount)) continue
       if (!datesClose(debit.date, credit.date)) continue

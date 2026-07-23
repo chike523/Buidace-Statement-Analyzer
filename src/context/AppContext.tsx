@@ -38,9 +38,9 @@ import {
   upsertAccount,
   getTransactionCount,
 } from '@/db/duckdb'
-import { detectDuplicates, countPendingDuplicates } from '@/lib/duplicates'
-import { detectRecurringPayments } from '@/lib/recurring'
-import { detectInternalTransfers, getTransferTransactionIds } from '@/lib/transfers'
+import { countPendingDuplicates } from '@/lib/duplicates'
+import { getTransferTransactionIds } from '@/lib/transfers'
+import { runAnalysis } from '@/lib/analysis-client'
 import { generateId } from '@/lib/utils'
 import type { ImportSummary } from '@/lib/import-helpers'
 
@@ -72,7 +72,7 @@ type AppContextValue = {
   ignoredIds: string[]
   transactionCount: number
   filteredCount: number
-  refreshData: () => Promise<void>
+  refreshData: () => Promise<number>
   createAccount: (name: string, currency?: string) => Promise<Account>
   addPendingImport: (file: File, fileType: ImportFileType) => string
   updatePendingImport: (id: string, update: Partial<PendingImport>) => void
@@ -139,7 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [transferPairs, rejectedTransferPairIds],
   )
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (): Promise<number> => {
     const [accts, ignored, count, rejectedPairs] = await Promise.all([
       getAccounts(),
       getIgnoredTransactionIds(),
@@ -159,19 +159,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const resolvedMap = new Map(
         existingGroups.filter((g) => g.status !== 'pending').map((g) => [g.fingerprint, g.status]),
       )
-      const groups = detectDuplicates(allTx).map((g) => ({
+      // Detection runs in a Web Worker to keep the UI responsive on large imports.
+      const { duplicateGroups, recurringPatterns, transferPairs } = await runAnalysis(
+        allTx,
+        visibleTx,
+      )
+      const groups = duplicateGroups.map((g) => ({
         ...g,
         status: resolvedMap.get(g.fingerprint) ?? g.status,
       }))
       setDuplicateGroups(groups)
       await saveDuplicateGroups(groups)
-      setRecurringPatterns(detectRecurringPayments(visibleTx))
-      setTransferPairs(detectInternalTransfers(allTx))
-    } else {
-      setDuplicateGroups([])
-      setRecurringPatterns([])
-      setTransferPairs([])
+      setRecurringPatterns(recurringPatterns)
+      setTransferPairs(transferPairs)
+      return countPendingDuplicates(groups)
     }
+
+    setDuplicateGroups([])
+    setRecurringPatterns([])
+    setTransferPairs([])
+    return 0
   }, [filters])
 
   useEffect(() => {
@@ -261,9 +268,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
       ])
       updatePendingImport(pendingId, { status: 'done' })
-      await refreshData()
-      const allTx = await getAllTransactions()
-      const dupes = countPendingDuplicates(detectDuplicates(allTx))
+      const dupes = await refreshData()
       completeImport({
         filename: pending.file.name,
         account_name: account?.name ?? 'Account',
@@ -310,9 +315,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
       ])
       updatePendingImport(pendingId, { status: 'done' })
-      await refreshData()
-      const allTx = await getAllTransactions()
-      const dupes = countPendingDuplicates(detectDuplicates(allTx))
+      const dupes = await refreshData()
       completeImport({
         filename: pending.file.name,
         account_name: account?.name ?? 'Account',
