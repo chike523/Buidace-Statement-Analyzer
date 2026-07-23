@@ -157,6 +157,16 @@ npm run build     # tsc -b && vite build
 npm run preview
 ```
 
+### Tests
+
+Parser unit tests (OFX/QFX and Excel) run on **Node's built-in test runner** with no extra dependencies — Node strips the TypeScript at runtime:
+
+```bash
+npm test
+```
+
+Fixtures live in `tests/fixtures/` (`sample.ofx`, `sample.xlsx`).
+
 > [!IMPORTANT]
 > Use **npm 10** to install/regenerate the lockfile. CI (GitHub Actions, Node 22) ships npm 10, which resolves the nested optional `*-wasm32-wasi` dependencies differently from npm 11 — mixing versions makes `npm ci` fail. If you're on Node 24 (npm 11), run `npx npm@10 install` when touching dependencies.
 
