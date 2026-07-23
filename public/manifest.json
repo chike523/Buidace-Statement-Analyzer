@@ -2,13 +2,13 @@
   "name": "Statement Analyzer",
   "short_name": "Statements",
   "description": "Local financial statement analyzer — 100% browser-based",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#fafafa",
   "theme_color": "#3b5bdb",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml"
     }
