@@ -2,20 +2,13 @@ import '@/lib/polyfills'
 import type { ParsedRow } from '@/types/transaction'
 import { parseGenericText } from '@/lib/parsers/statement-text'
 import { rowsToTransactions } from '@/lib/parsers/shared'
+import { loadPdfJs } from '@/lib/parsers/pdfjs'
 
 export type PdfParseOutput = {
   rows: ParsedRow[]
   page_count: number
   has_text_layer: boolean
   raw_text_preview: string
-}
-
-async function loadPdfJs() {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  // Bundled as a real worker entry so Safari gets polyfills before pdf.js loads.
-  const { default: workerUrl } = await import('@/workers/pdf.polyfill.worker.ts?worker&url')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-  return pdfjsLib
 }
 
 export async function parsePdfBuffer(

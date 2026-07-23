@@ -19,3 +19,7 @@ declare module '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url' {
   const url: string
   export default url
 }
+
+declare module 'pdfjs-dist/legacy/build/pdf.worker.mjs' {
+  export const WorkerMessageHandler: unknown
+}

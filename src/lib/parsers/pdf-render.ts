@@ -1,9 +1,8 @@
 import '@/lib/polyfills'
+import { loadPdfJs } from '@/lib/parsers/pdfjs'
 
 export async function renderPdfPagesToImages(buffer: ArrayBuffer): Promise<ImageData[]> {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  const { default: workerUrl } = await import('@/workers/pdf.polyfill.worker.ts?worker&url')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+  const pdfjsLib = await loadPdfJs()
 
   const pdf = await pdfjsLib.getDocument({
     data: new Uint8Array(buffer),

@@ -53,6 +53,8 @@ export default defineConfig({
     format: 'es',
   },
   optimizeDeps: {
-    exclude: ['@duckdb/duckdb-wasm'],
+    // Keep DuckDB and pdf.js out of Vite's prebundle so their WASM/worker and
+    // legacy Safari polyfills are not rewritten incorrectly.
+    exclude: ['@duckdb/duckdb-wasm', 'pdfjs-dist'],
   },
 })
