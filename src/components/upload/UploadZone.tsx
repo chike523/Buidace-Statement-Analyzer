@@ -123,9 +123,17 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
           })
         }
       } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : typeof err === 'string'
+              ? err
+              : 'Parse failed'
         updatePendingImport(id, {
           status: 'error',
-          error: err instanceof Error ? err.message : 'Parse failed',
+          error: /not a function|withResolvers|sumPrecise/i.test(message)
+            ? 'This PDF could not be read on this browser. Try updating your browser, or export the statement as CSV/Excel from your bank.'
+            : message,
         })
       }
     },

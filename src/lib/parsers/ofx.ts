@@ -34,8 +34,16 @@ export function parseOfxText(text: string, filename: string): OfxParseOutput {
   const currency = tag(text, 'CURDEF') || undefined
 
   let index = 0
-  for (const match of text.matchAll(STMTTRN_RE)) {
-    const block = match[1]
+  const txnBlocks: string[] = []
+  const flags = STMTTRN_RE.flags.includes('g') ? STMTTRN_RE.flags : `${STMTTRN_RE.flags}g`
+  const re = new RegExp(STMTTRN_RE.source, flags)
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    txnBlocks.push(match[1])
+    if (match[0].length === 0) re.lastIndex += 1
+  }
+
+  for (const block of txnBlocks) {
     const date = parseOfxDate(tag(block, 'DTPOSTED'))
     const amountRaw = tag(block, 'TRNAMT')
     const amount = Number.parseFloat(amountRaw)

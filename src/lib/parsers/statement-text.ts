@@ -21,11 +21,24 @@ function parseAmountToken(token: string): number | null {
   return Number.isFinite(num) ? num : null
 }
 
+/** `String.matchAll` can be missing or awkward on older mobile browsers. */
+function matchAll(text: string, pattern: RegExp): RegExpExecArray[] {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
+  const re = new RegExp(pattern.source, flags)
+  const matches: RegExpExecArray[] = []
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    matches.push(match)
+    if (match[0].length === 0) re.lastIndex += 1
+  }
+  return matches
+}
+
 export function parseTabularText(text: string): { date: string; description: string; amount: number }[] {
   const rows: { date: string; description: string; amount: number }[] = []
   const normalized = text.replace(/\s+/g, ' ')
 
-  for (const match of normalized.matchAll(TABULAR_ROW_RE)) {
+  for (const match of matchAll(normalized, TABULAR_ROW_RE)) {
     const date = parseMonthDate(match[1])
     const description = match[2].trim()
     const debit = parseAmountToken(match[3])

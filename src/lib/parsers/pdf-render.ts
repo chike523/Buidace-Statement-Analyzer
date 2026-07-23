@@ -2,12 +2,14 @@ import '@/lib/polyfills'
 
 export async function renderPdfPagesToImages(buffer: ArrayBuffer): Promise<ImageData[]> {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/legacy/build/pdf.worker.mjs',
-    import.meta.url,
-  ).toString()
+  const { default: workerUrl } = await import('@/workers/pdf.polyfill.worker.ts?worker&url')
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  } as Parameters<typeof pdfjsLib.getDocument>[0]).promise
   const images: ImageData[] = []
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {

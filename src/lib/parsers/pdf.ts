@@ -10,20 +10,26 @@ export type PdfParseOutput = {
   raw_text_preview: string
 }
 
+async function loadPdfJs() {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  // Bundled as a real worker entry so Safari gets polyfills before pdf.js loads.
+  const { default: workerUrl } = await import('@/workers/pdf.polyfill.worker.ts?worker&url')
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+  return pdfjsLib
+}
+
 export async function parsePdfBuffer(
   buffer: ArrayBuffer,
   filename: string,
   onProgress?: (page: number, total: number) => void,
 ): Promise<PdfParseOutput> {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.mjs?url')).default
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+  const pdfjsLib = await loadPdfJs()
 
   const pdf = await pdfjsLib.getDocument({
     data: new Uint8Array(buffer),
     useWorkerFetch: false,
     isEvalSupported: false,
-  } as Parameters<typeof pdfjsLib.getDocument>[0] & { disableWorker?: boolean }).promise
+  } as Parameters<typeof pdfjsLib.getDocument>[0]).promise
 
   const pageTexts: string[] = []
   let totalTextLength = 0
@@ -99,6 +105,11 @@ export async function runOcrOnPdf(
         worker.terminate()
         reject(new Error(data.message))
       }
+    }
+
+    worker.onerror = (event) => {
+      worker.terminate()
+      reject(new Error(event.message || 'OCR worker failed'))
     }
 
     worker.postMessage({
