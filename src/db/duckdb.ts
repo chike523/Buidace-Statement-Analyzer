@@ -22,6 +22,9 @@ const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
   eh: { mainModule: duckdb_wasm_eh, mainWorker: eh_worker },
 }
 
+/** Values that can be safely bound to a prepared statement. */
+type SqlParam = string | number | boolean | null
+
 let dbInstance: duckdb.AsyncDuckDB | null = null
 let connInstance: duckdb.AsyncDuckDBConnection | null = null
 
@@ -95,29 +98,59 @@ async function getConnection(): Promise<duckdb.AsyncDuckDBConnection> {
   return connInstance
 }
 
+/**
+ * Run a read query with bound parameters via a prepared statement, returning the
+ * result rows. Parameters are always bound (never interpolated) to avoid any SQL
+ * injection or quoting issues from user-provided descriptions, search terms, etc.
+ */
+async function runQuery(
+  sql: string,
+  params: SqlParam[] = [],
+): Promise<Record<string, unknown>[]> {
+  const conn = await getConnection()
+  if (params.length === 0) {
+    const result = await conn.query(sql)
+    return result.toArray() as Record<string, unknown>[]
+  }
+  const stmt = await conn.prepare(sql)
+  try {
+    const result = await stmt.query(...params)
+    return result.toArray() as Record<string, unknown>[]
+  } finally {
+    await stmt.close()
+  }
+}
+
+/** Build a parameterized WHERE clause plus its ordered bind parameters. */
 function buildFilterWhere(
   filters: TransactionFilters,
   ignoredIds: string[],
   options?: { includeSearch?: boolean; excludeTransactionIds?: string[] },
-): string {
+): { where: string; params: SqlParam[] } {
   const conditions: string[] = ['1=1']
+  const params: SqlParam[] = []
   const includeSearch = options?.includeSearch !== false
   const excludeTransactionIds = options?.excludeTransactionIds ?? []
 
   if (filters.account_id !== 'all') {
-    conditions.push(`t.account_id = '${filters.account_id}'`)
+    conditions.push('t.account_id = ?')
+    params.push(filters.account_id)
   }
   if (filters.date_from) {
-    conditions.push(`t.date >= '${filters.date_from}'`)
+    conditions.push('t.date >= ?')
+    params.push(filters.date_from)
   }
   if (filters.date_to) {
-    conditions.push(`t.date <= '${filters.date_to}'`)
+    conditions.push('t.date <= ?')
+    params.push(filters.date_to)
   }
   if (filters.amount_min) {
-    conditions.push(`t.amount >= ${Number.parseFloat(filters.amount_min)}`)
+    conditions.push('t.amount >= ?')
+    params.push(Number.parseFloat(filters.amount_min))
   }
   if (filters.amount_max) {
-    conditions.push(`t.amount <= ${Number.parseFloat(filters.amount_max)}`)
+    conditions.push('t.amount <= ?')
+    params.push(Number.parseFloat(filters.amount_max))
   }
   if (filters.type === 'debit') {
     conditions.push('t.amount < 0')
@@ -126,17 +159,19 @@ function buildFilterWhere(
     conditions.push('t.amount > 0')
   }
   if (includeSearch && filters.search) {
-    const escaped = filters.search.replace(/'/g, "''")
-    conditions.push(`LOWER(t.description) LIKE LOWER('%${escaped}%')`)
+    conditions.push('LOWER(t.description) LIKE LOWER(?)')
+    params.push(`%${filters.search}%`)
   }
   if (ignoredIds.length > 0) {
-    conditions.push(`t.id NOT IN (${ignoredIds.map((id) => `'${id}'`).join(',')})`)
+    conditions.push(`t.id NOT IN (${ignoredIds.map(() => '?').join(',')})`)
+    params.push(...ignoredIds)
   }
   if (excludeTransactionIds.length > 0) {
-    conditions.push(`t.id NOT IN (${excludeTransactionIds.map((id) => `'${id}'`).join(',')})`)
+    conditions.push(`t.id NOT IN (${excludeTransactionIds.map(() => '?').join(',')})`)
+    params.push(...excludeTransactionIds)
   }
 
-  return conditions.join(' AND ')
+  return { where: conditions.join(' AND '), params }
 }
 
 export async function initDatabase(): Promise<void> {
@@ -145,17 +180,15 @@ export async function initDatabase(): Promise<void> {
 }
 
 export async function upsertAccount(account: Account): Promise<void> {
-  const conn = await getConnection()
-  await conn.query(`
-    INSERT OR REPLACE INTO accounts (id, name, currency)
-    VALUES ('${account.id}', '${account.name.replace(/'/g, "''")}', '${account.currency}')
-  `)
+  await runQuery(
+    `INSERT OR REPLACE INTO accounts (id, name, currency) VALUES (?, ?, ?)`,
+    [account.id, account.name, account.currency],
+  )
 }
 
 export async function getAccounts(): Promise<Account[]> {
-  const conn = await getConnection()
-  const result = await conn.query('SELECT id, name, currency FROM accounts ORDER BY name')
-  return result.toArray().map((row) => ({
+  const rows = await runQuery('SELECT id, name, currency FROM accounts ORDER BY name')
+  return rows.map((row) => ({
     id: String(row.id),
     name: String(row.name),
     currency: String(row.currency),
@@ -166,28 +199,38 @@ export async function insertTransactions(transactions: Transaction[]): Promise<v
   if (transactions.length === 0) return
   const conn = await getConnection()
 
-  const batchSize = 500
-  for (let i = 0; i < transactions.length; i += batchSize) {
-    const batch = transactions.slice(i, i + batchSize)
-    const values = batch
-      .map(
-        (t) =>
-          `('${t.id}', '${t.account_id}', '${t.date}', '${t.description.replace(/'/g, "''")}', ${t.amount}, ${t.balance ?? 'NULL'}, ${t.currency ? `'${t.currency}'` : 'NULL'}, '${t.raw_source.replace(/'/g, "''")}', '${t.import_batch_id}')`,
-      )
-      .join(',\n')
+  const stmt = await conn.prepare(`
+    INSERT OR REPLACE INTO transactions
+    (id, account_id, date, description, amount, balance, currency, raw_source, import_batch_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
 
-    await conn.query(`
-      INSERT OR REPLACE INTO transactions
-      (id, account_id, date, description, amount, balance, currency, raw_source, import_batch_id)
-      VALUES ${values}
-    `)
+  await conn.query('BEGIN TRANSACTION')
+  try {
+    for (const t of transactions) {
+      await stmt.query(
+        t.id,
+        t.account_id,
+        t.date,
+        t.description,
+        t.amount,
+        t.balance ?? null,
+        t.currency ?? null,
+        t.raw_source,
+        t.import_batch_id,
+      )
+    }
+    await conn.query('COMMIT')
+  } catch (err) {
+    await conn.query('ROLLBACK')
+    throw err
+  } finally {
+    await stmt.close()
   }
 }
 
-export async function getAllTransactions(): Promise<Transaction[]> {
-  const conn = await getConnection()
-  const result = await conn.query('SELECT * FROM transactions ORDER BY date DESC')
-  return result.toArray().map((row) => ({
+function mapTransactionRow(row: Record<string, unknown>): Transaction {
+  return {
     id: String(row.id),
     account_id: String(row.account_id),
     date: normalizeRowDate(row.date),
@@ -197,7 +240,12 @@ export async function getAllTransactions(): Promise<Transaction[]> {
     currency: row.currency != null ? String(row.currency) : undefined,
     raw_source: String(row.raw_source),
     import_batch_id: String(row.import_batch_id),
-  }))
+  }
+}
+
+export async function getAllTransactions(): Promise<Transaction[]> {
+  const rows = await runQuery('SELECT * FROM transactions ORDER BY date DESC')
+  return rows.map(mapTransactionRow)
 }
 
 export async function queryTransactions(
@@ -206,36 +254,29 @@ export async function queryTransactions(
   limit = 10000,
   offset = 0,
 ): Promise<Transaction[]> {
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds)
-  const result = await conn.query(`
+  const { where, params } = buildFilterWhere(filters, ignoredIds)
+  const rows = await runQuery(
+    `
     SELECT t.* FROM transactions t
     WHERE ${where}
     ORDER BY t.date DESC, t.description
-    LIMIT ${limit} OFFSET ${offset}
-  `)
-  return result.toArray().map((row) => ({
-    id: String(row.id),
-    account_id: String(row.account_id),
-    date: normalizeRowDate(row.date),
-    description: String(row.description),
-    amount: Number(row.amount),
-    balance: row.balance != null ? Number(row.balance) : undefined,
-    currency: row.currency != null ? String(row.currency) : undefined,
-    raw_source: String(row.raw_source),
-    import_batch_id: String(row.import_batch_id),
-  }))
+    LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+  `,
+    params,
+  )
+  return rows.map(mapTransactionRow)
 }
 
 export async function countTransactions(
   filters: TransactionFilters,
   ignoredIds: string[] = [],
 ): Promise<number> {
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds)
-  const result = await conn.query(`SELECT COUNT(*) as cnt FROM transactions t WHERE ${where}`)
-  const row = result.toArray()[0]
-  return Number(row?.cnt ?? 0)
+  const { where, params } = buildFilterWhere(filters, ignoredIds)
+  const rows = await runQuery(
+    `SELECT COUNT(*) as cnt FROM transactions t WHERE ${where}`,
+    params,
+  )
+  return Number(rows[0]?.cnt ?? 0)
 }
 
 export async function getDashboardStats(
@@ -243,9 +284,9 @@ export async function getDashboardStats(
   ignoredIds: string[] = [],
   excludeTransactionIds: string[] = [],
 ): Promise<DashboardStats> {
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
-  const result = await conn.query(`
+  const { where, params } = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
+  const rows = await runQuery(
+    `
     SELECT
       COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_income,
       COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_expenses,
@@ -253,8 +294,10 @@ export async function getDashboardStats(
       COUNT(*) as transaction_count
     FROM transactions t
     WHERE ${where}
-  `)
-  const row = result.toArray()[0]
+  `,
+    params,
+  )
+  const row = rows[0]
   return {
     total_income: Number(row?.total_income ?? 0),
     total_expenses: Number(row?.total_expenses ?? 0),
@@ -268,9 +311,9 @@ export async function getMonthlyFlow(
   ignoredIds: string[] = [],
   excludeTransactionIds: string[] = [],
 ): Promise<MonthlyFlow[]> {
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
-  const result = await conn.query(`
+  const { where, params } = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
+  const rows = await runQuery(
+    `
     SELECT
       strftime(date, '%Y-%m') as month,
       COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as income,
@@ -280,8 +323,10 @@ export async function getMonthlyFlow(
     WHERE ${where}
     GROUP BY 1
     ORDER BY 1
-  `)
-  return result.toArray().map((row) => ({
+  `,
+    params,
+  )
+  return rows.map((row) => ({
     month: String(row.month),
     income: Number(row.income),
     expenses: Number(row.expenses),
@@ -299,9 +344,9 @@ export async function getTopMerchants(
   const merchantMode = options?.merchantMode ?? 'exact'
 
   if (merchantMode === 'exact') {
-    const conn = await getConnection()
-    const where = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
-    const result = await conn.query(`
+    const { where, params } = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
+    const rows = await runQuery(
+      `
       SELECT
         description as merchant,
         SUM(ABS(amount)) as total,
@@ -310,9 +355,11 @@ export async function getTopMerchants(
       WHERE ${where} AND amount < 0
       GROUP BY description
       ORDER BY total DESC
-      LIMIT ${limit}
-    `)
-    return result.toArray().map((row) => ({
+      LIMIT ${Number(limit)}
+    `,
+      params,
+    )
+    return rows.map((row) => ({
       merchant: String(row.merchant),
       total: Number(row.total),
       count: Number(row.count),
@@ -334,9 +381,9 @@ export async function getTopMerchantsByCredit(
   const merchantMode = options?.merchantMode ?? 'exact'
 
   if (merchantMode === 'exact') {
-    const conn = await getConnection()
-    const where = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
-    const result = await conn.query(`
+    const { where, params } = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
+    const rows = await runQuery(
+      `
       SELECT
         description as merchant,
         SUM(amount) as total,
@@ -345,9 +392,11 @@ export async function getTopMerchantsByCredit(
       WHERE ${where} AND amount > 0
       GROUP BY description
       ORDER BY total DESC
-      LIMIT ${limit}
-    `)
-    return result.toArray().map((row) => ({
+      LIMIT ${Number(limit)}
+    `,
+      params,
+    )
+    return rows.map((row) => ({
       merchant: String(row.merchant),
       total: Number(row.total),
       count: Number(row.count),
@@ -364,14 +413,16 @@ async function getMerchantAggregationRows(
   ignoredIds: string[],
   excludeTransactionIds: string[],
 ): Promise<{ description: string; amount: number }[]> {
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
-  const result = await conn.query(`
+  const { where, params } = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
+  const rows = await runQuery(
+    `
     SELECT description, amount
     FROM transactions t
     WHERE ${where}
-  `)
-  return result.toArray().map((row) => ({
+  `,
+    params,
+  )
+  return rows.map((row) => ({
     description: String(row.description),
     amount: Number(row.amount),
   }))
@@ -386,22 +437,23 @@ export async function searchPayeeNames(
   const trimmed = query.trim()
   if (trimmed.length < 2) return []
 
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds, { includeSearch: false })
-  const escaped = trimmed.replace(/'/g, "''")
-  const result = await conn.query(`
+  const { where, params } = buildFilterWhere(filters, ignoredIds, { includeSearch: false })
+  const rows = await runQuery(
+    `
     SELECT
       description as name,
       COUNT(*) as count,
       SUM(amount) as total_amount
     FROM transactions t
     WHERE ${where}
-      AND LOWER(t.description) LIKE LOWER('%${escaped}%')
+      AND LOWER(t.description) LIKE LOWER(?)
     GROUP BY description
     ORDER BY count DESC, ABS(SUM(amount)) DESC
-    LIMIT ${limit}
-  `)
-  return result.toArray().map((row) => ({
+    LIMIT ${Number(limit)}
+  `,
+    [...params, `%${trimmed}%`],
+  )
+  return rows.map((row) => ({
     name: String(row.name),
     count: Number(row.count),
     total_amount: Number(row.total_amount),
@@ -413,9 +465,9 @@ export async function getAccountBreakdown(
   ignoredIds: string[] = [],
   excludeTransactionIds: string[] = [],
 ): Promise<AccountBreakdown[]> {
-  const conn = await getConnection()
-  const where = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
-  const result = await conn.query(`
+  const { where, params } = buildFilterWhere(filters, ignoredIds, { excludeTransactionIds })
+  const rows = await runQuery(
+    `
     SELECT
       t.account_id,
       a.name as account_name,
@@ -427,8 +479,10 @@ export async function getAccountBreakdown(
     WHERE ${where}
     GROUP BY t.account_id, a.name
     ORDER BY a.name
-  `)
-  return result.toArray().map((row) => ({
+  `,
+    params,
+  )
+  return rows.map((row) => ({
     account_id: String(row.account_id),
     account_name: String(row.account_name ?? row.account_id),
     income: Number(row.income),
@@ -442,34 +496,41 @@ export async function saveDuplicateGroups(groups: DuplicateGroup[]): Promise<voi
   await conn.query('DELETE FROM duplicate_groups')
   await conn.query('DELETE FROM duplicate_members')
 
-  for (const group of groups) {
-    await conn.query(`
-      INSERT INTO duplicate_groups (id, fingerprint, status)
-      VALUES ('${group.id}', '${group.fingerprint.replace(/'/g, "''")}', '${group.status}')
-    `)
-    for (const txId of group.transaction_ids) {
-      await conn.query(`
-        INSERT INTO duplicate_members (group_id, transaction_id)
-        VALUES ('${group.id}', '${txId}')
-      `)
+  if (groups.length === 0) return
+
+  const groupStmt = await conn.prepare(
+    `INSERT INTO duplicate_groups (id, fingerprint, status) VALUES (?, ?, ?)`,
+  )
+  const memberStmt = await conn.prepare(
+    `INSERT INTO duplicate_members (group_id, transaction_id) VALUES (?, ?)`,
+  )
+  try {
+    for (const group of groups) {
+      await groupStmt.query(group.id, group.fingerprint, group.status)
+      for (const txId of group.transaction_ids) {
+        await memberStmt.query(group.id, txId)
+      }
     }
+  } finally {
+    await groupStmt.close()
+    await memberStmt.close()
   }
 }
 
 export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
-  const conn = await getConnection()
-  const groupsResult = await conn.query('SELECT id, fingerprint, status FROM duplicate_groups')
+  const groupRows = await runQuery('SELECT id, fingerprint, status FROM duplicate_groups')
   const groups: DuplicateGroup[] = []
 
-  for (const row of groupsResult.toArray()) {
-    const membersResult = await conn.query(
-      `SELECT transaction_id FROM duplicate_members WHERE group_id = '${row.id}'`,
+  for (const row of groupRows) {
+    const memberRows = await runQuery(
+      `SELECT transaction_id FROM duplicate_members WHERE group_id = ?`,
+      [String(row.id)],
     )
     groups.push({
       id: String(row.id),
       fingerprint: String(row.fingerprint),
       status: String(row.status) as DuplicateGroup['status'],
-      transaction_ids: membersResult.toArray().map((m) => String(m.transaction_id)),
+      transaction_ids: memberRows.map((m) => String(m.transaction_id)),
     })
   }
 
@@ -477,8 +538,7 @@ export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
 }
 
 export async function getIgnoredTransactionIds(): Promise<string[]> {
-  const conn = await getConnection()
-  const result = await conn.query(`
+  const rows = await runQuery(`
     WITH ranked AS (
       SELECT
         dm.transaction_id,
@@ -491,30 +551,23 @@ export async function getIgnoredTransactionIds(): Promise<string[]> {
     JOIN duplicate_groups dg ON r.group_id = dg.id
     WHERE dg.status = 'ignored' AND r.rn > 1
   `)
-  return result.toArray().map((row) => String(row.transaction_id))
+  return rows.map((row) => String(row.transaction_id))
 }
 
 export async function getTransactionCount(): Promise<number> {
-  const conn = await getConnection()
-  const result = await conn.query('SELECT COUNT(*) as cnt FROM transactions')
-  return Number(result.toArray()[0]?.cnt ?? 0)
+  const rows = await runQuery('SELECT COUNT(*) as cnt FROM transactions')
+  return Number(rows[0]?.cnt ?? 0)
 }
 
 export async function getRejectedTransferPairIds(): Promise<string[]> {
-  const conn = await getConnection()
-  const result = await conn.query('SELECT pair_id FROM transfer_rejections')
-  return result.toArray().map((row) => String(row.pair_id))
+  const rows = await runQuery('SELECT pair_id FROM transfer_rejections')
+  return rows.map((row) => String(row.pair_id))
 }
 
 export async function rejectTransferPair(pairId: string): Promise<void> {
-  const conn = await getConnection()
-  await conn.query(`
-    INSERT OR REPLACE INTO transfer_rejections (pair_id)
-    VALUES ('${pairId.replace(/'/g, "''")}')
-  `)
+  await runQuery(`INSERT OR REPLACE INTO transfer_rejections (pair_id) VALUES (?)`, [pairId])
 }
 
 export async function unrejectTransferPair(pairId: string): Promise<void> {
-  const conn = await getConnection()
-  await conn.query(`DELETE FROM transfer_rejections WHERE pair_id = '${pairId.replace(/'/g, "''")}'`)
+  await runQuery(`DELETE FROM transfer_rejections WHERE pair_id = ?`, [pairId])
 }
