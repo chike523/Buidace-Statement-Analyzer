@@ -159,7 +159,7 @@ npm run preview
 
 ### Tests
 
-Parser unit tests (OFX/QFX and Excel) run on **Node's built-in test runner** with no extra dependencies — Node strips the TypeScript at runtime:
+Unit tests cover the parsers (OFX/QFX, Excel) and the analysis algorithms (duplicate, recurring, transfer, and merchant detection). They run on **Node's built-in test runner** with no extra dependencies — Node strips the TypeScript at runtime, and a tiny resolver hook (`tests/hooks/`) maps the `@/` path alias:
 
 ```bash
 npm test
