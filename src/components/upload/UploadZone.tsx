@@ -21,6 +21,20 @@ type UploadZoneProps = {
   compact?: boolean
 }
 
+/** Upper bounds on file size to avoid freezing the tab or exhausting memory. */
+const MAX_SIZE_BYTES: Record<ImportFileType, number> = {
+  csv: 25 * 1024 * 1024,
+  excel: 25 * 1024 * 1024,
+  ofx: 25 * 1024 * 1024,
+  pdf: 50 * 1024 * 1024,
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
 export function UploadZone({ compact = false }: UploadZoneProps) {
   const {
     pendingImports,
@@ -38,6 +52,16 @@ export function UploadZone({ compact = false }: UploadZoneProps) {
     async (file: File) => {
       const fileType = detectFileType(file)
       const id = addPendingImport(file, fileType)
+
+      const maxSize = MAX_SIZE_BYTES[fileType]
+      if (file.size > maxSize) {
+        updatePendingImport(id, {
+          status: 'error',
+          error: `File is too large (${formatBytes(file.size)}). The limit for ${fileType.toUpperCase()} files is ${formatBytes(maxSize)}.`,
+        })
+        return
+      }
+
       updatePendingImport(id, { status: 'parsing', parseProgress: 0 })
 
       try {
